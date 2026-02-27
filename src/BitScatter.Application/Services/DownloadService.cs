@@ -48,10 +48,10 @@ public class DownloadService : IDownloadService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var provider = GetProvider(chunkInfo.StorageProviderType);
+            var provider = GetProvider(chunkInfo.ProviderName, chunkInfo.StorageProviderType);
 
-            _logger.LogDebug("Reading chunk {Index} from provider {ProviderType} with key {Key}",
-                chunkInfo.ChunkIndex, chunkInfo.StorageProviderType, chunkInfo.StorageKey);
+            _logger.LogDebug("Reading chunk {Index} from provider {Name} ({ProviderType}) with key {Key}",
+                chunkInfo.ChunkIndex, chunkInfo.ProviderName, chunkInfo.StorageProviderType, chunkInfo.StorageKey);
 
             await using var chunkStream = await provider.ReadChunkAsync(chunkInfo.StorageKey, cancellationToken);
 
@@ -94,11 +94,19 @@ public class DownloadService : IDownloadService
         };
     }
 
-    private IStorageProvider GetProvider(StorageProviderType type)
+    private IStorageProvider GetProvider(string providerName, StorageProviderType fallbackType)
     {
-        var provider = _storageProviders.FirstOrDefault(p => p.ProviderType == type);
-        if (provider is null)
-            throw new InvalidOperationException($"No storage provider registered for type: {type}");
-        return provider;
+        // Look up by name first (handles multiple nodes of the same type)
+        if (!string.IsNullOrEmpty(providerName))
+        {
+            var byName = _storageProviders.FirstOrDefault(p => p.Name == providerName);
+            if (byName is not null) return byName;
+        }
+
+        // Fall back to type-based lookup for backward compatibility
+        var byType = _storageProviders.FirstOrDefault(p => p.ProviderType == fallbackType);
+        if (byType is null)
+            throw new InvalidOperationException($"No storage provider registered for name '{providerName}' or type '{fallbackType}'.");
+        return byType;
     }
 }

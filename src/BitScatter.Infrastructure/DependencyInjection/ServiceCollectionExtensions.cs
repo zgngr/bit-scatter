@@ -1,5 +1,7 @@
 using BitScatter.Application.Interfaces;
 using BitScatter.Application.Services;
+using BitScatter.Application.Strategies;
+using BitScatter.Infrastructure.Configuration;
 using BitScatter.Infrastructure.Data;
 using BitScatter.Infrastructure.Repositories;
 using BitScatter.Infrastructure.Storage;
@@ -35,15 +37,44 @@ public static class ServiceCollectionExtensions
                     sp.GetRequiredService<ILogger<DatabaseStorageProvider>>()));
         }
 
-        var fileSystemPath = configuration["Storage:FileSystemPath"] ?? "chunks";
+        var fsProviders = configuration
+            .GetSection("BitScatter:FileSystemProviders")
+            .GetChildren()
+            .Select(s => new FileSystemProviderOptions
+            {
+                Name = s["Name"] ?? string.Empty,
+                Path = s["Path"] ?? string.Empty
+            })
+            .Where(p => !string.IsNullOrEmpty(p.Name) && !string.IsNullOrEmpty(p.Path))
+            .ToArray();
 
-        services.AddScoped<IStorageProvider>(sp =>
-            new FileSystemStorageProvider(
-                fileSystemPath,
-                sp.GetRequiredService<ILogger<FileSystemStorageProvider>>()));
+        if (fsProviders.Length > 0)
+        {
+            foreach (var fsProvider in fsProviders)
+            {
+                var name = fsProvider.Name;
+                var path = fsProvider.Path;
+                services.AddScoped<IStorageProvider>(sp =>
+                    new FileSystemStorageProvider(
+                        name,
+                        path,
+                        sp.GetRequiredService<ILogger<FileSystemStorageProvider>>()));
+            }
+        }
+        else
+        {
+            // Fallback: single provider from legacy config
+            var fileSystemPath = configuration["Storage:FileSystemPath"] ?? "chunks";
+            services.AddScoped<IStorageProvider>(sp =>
+                new FileSystemStorageProvider(
+                    "filesystem",
+                    fileSystemPath,
+                    sp.GetRequiredService<ILogger<FileSystemStorageProvider>>()));
+        }
 
         services.AddScoped<IFileManifestRepository, FileManifestRepository>();
         services.AddScoped<IChecksumService, ChecksumService>();
+        services.AddSingleton<IScatteringStrategy, RoundRobinScatteringStrategy>();
         services.AddScoped<IUploadService, UploadService>();
         services.AddScoped<IDownloadService, DownloadService>();
 

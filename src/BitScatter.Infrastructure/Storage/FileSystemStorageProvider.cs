@@ -13,10 +13,12 @@ public class FileSystemStorageProvider : IStorageProvider
     private readonly ILogger<FileSystemStorageProvider> _logger;
     private readonly AsyncRetryPolicy _retryPolicy;
 
+    public string Name { get; }
     public StorageProviderType ProviderType => StorageProviderType.FileSystem;
 
-    public FileSystemStorageProvider(string basePath, ILogger<FileSystemStorageProvider> logger)
+    public FileSystemStorageProvider(string name, string basePath, ILogger<FileSystemStorageProvider> logger)
     {
+        Name = name;
         _basePath = basePath;
         _logger = logger;
         _retryPolicy = Policy

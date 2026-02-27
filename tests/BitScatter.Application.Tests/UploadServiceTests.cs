@@ -1,6 +1,7 @@
 using BitScatter.Application.DTOs;
 using BitScatter.Application.Interfaces;
 using BitScatter.Application.Services;
+using BitScatter.Application.Strategies;
 using BitScatter.Domain.Entities;
 using BitScatter.Domain.Enums;
 using FluentAssertions;
@@ -36,6 +37,7 @@ public class UploadServiceTests : IDisposable
             .ReturnsAsync("filechecksum");
 
         _providerMock = new Mock<IStorageProvider>();
+        _providerMock.SetupGet(p => p.Name).Returns("node1");
         _providerMock.SetupGet(p => p.ProviderType).Returns(StorageProviderType.FileSystem);
         _providerMock
             .Setup(p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -45,6 +47,7 @@ public class UploadServiceTests : IDisposable
             [_providerMock.Object],
             _repoMock.Object,
             _checksumMock.Object,
+            new RoundRobinScatteringStrategy(),
             NullLogger<UploadService>.Instance);
     }
 
@@ -116,6 +119,94 @@ public class UploadServiceTests : IDisposable
 
         var act = () => _sut.UploadAsync(_testFile, options);
         await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task UploadAsync_NullProviders_UsesAllAvailableProviders()
+    {
+        var dbProviderMock = new Mock<IStorageProvider>();
+        dbProviderMock.SetupGet(p => p.Name).Returns("database");
+        dbProviderMock.SetupGet(p => p.ProviderType).Returns(StorageProviderType.Database);
+        dbProviderMock
+            .Setup(p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Stream s, string key, CancellationToken ct) => key);
+
+        var sut = new UploadService(
+            [_providerMock.Object, dbProviderMock.Object],
+            _repoMock.Object,
+            _checksumMock.Object,
+            new RoundRobinScatteringStrategy(),
+            NullLogger<UploadService>.Instance);
+
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = null // all available
+        };
+
+        var result = await sut.UploadAsync(_testFile, options);
+
+        result.Success.Should().BeTrue();
+        result.ChunkCount.Should().Be(2);
+
+        // Each provider receives exactly one chunk via round-robin
+        _providerMock.Verify(
+            p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        dbProviderMock.Verify(
+            p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UploadAsync_MultipleProviders_ScattersChunksRoundRobin()
+    {
+        var dbProviderMock = new Mock<IStorageProvider>();
+        dbProviderMock.SetupGet(p => p.Name).Returns("database");
+        dbProviderMock.SetupGet(p => p.ProviderType).Returns(StorageProviderType.Database);
+        dbProviderMock
+            .Setup(p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Stream s, string key, CancellationToken ct) => key);
+
+        var sut = new UploadService(
+            [_providerMock.Object, dbProviderMock.Object],
+            _repoMock.Object,
+            _checksumMock.Object,
+            new RoundRobinScatteringStrategy(),
+            NullLogger<UploadService>.Instance);
+
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [StorageProviderType.FileSystem, StorageProviderType.Database]
+        };
+
+        var result = await sut.UploadAsync(_testFile, options);
+
+        result.Success.Should().BeTrue();
+        result.ChunkCount.Should().Be(2);
+
+        _providerMock.Verify(
+            p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        dbProviderMock.Verify(
+            p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UploadAsync_EmptyProviders_UsesAllAvailableProviders()
+    {
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [] // treated same as null
+        };
+
+        var result = await _sut.UploadAsync(_testFile, options);
+
+        result.Success.Should().BeTrue();
+        result.ChunkCount.Should().Be(2);
     }
 
     public void Dispose()
