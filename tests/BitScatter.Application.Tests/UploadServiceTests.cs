@@ -209,6 +209,116 @@ public class UploadServiceTests : IDisposable
         result.ChunkCount.Should().Be(2);
     }
 
+    // UploadManyAsync tests
+
+    [Fact]
+    public async Task UploadManyAsync_MultipleValidFiles_ReturnsAllSuccessResults()
+    {
+        var secondFile = Path.Combine(_tempDir, "test2.bin");
+        File.WriteAllBytes(secondFile, new byte[1024]);
+
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [StorageProviderType.FileSystem]
+        };
+
+        var result = await _sut.UploadManyAsync([_testFile, secondFile], options);
+
+        result.AllSucceeded.Should().BeTrue();
+        result.TotalCount.Should().Be(2);
+        result.SuccessCount.Should().Be(2);
+        result.FailureCount.Should().Be(0);
+        result.Results.Should().AllSatisfy(r => r.Success.Should().BeTrue());
+    }
+
+    [Fact]
+    public async Task UploadManyAsync_OneFileMissing_ContinuesAndReturnsPartialResults()
+    {
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [StorageProviderType.FileSystem]
+        };
+
+        var result = await _sut.UploadManyAsync(["/nonexistent/file.bin", _testFile], options);
+
+        result.TotalCount.Should().Be(2);
+        result.SuccessCount.Should().Be(1);
+        result.FailureCount.Should().Be(1);
+        result.AllSucceeded.Should().BeFalse();
+        result.Results.Should().ContainSingle(r => !r.Success);
+        result.Results.Should().ContainSingle(r => r.Success);
+    }
+
+    [Fact]
+    public async Task UploadManyAsync_AllFilesMissing_ReturnsAllFailures()
+    {
+        var options = new UploadOptions { StorageProviders = [StorageProviderType.FileSystem] };
+
+        var result = await _sut.UploadManyAsync(["/missing1.bin", "/missing2.bin"], options);
+
+        result.AllSucceeded.Should().BeFalse();
+        result.SuccessCount.Should().Be(0);
+        result.FailureCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task UploadManyAsync_EmptyList_ReturnsEmptyBatchResult()
+    {
+        var options = new UploadOptions { StorageProviders = [StorageProviderType.FileSystem] };
+
+        var result = await _sut.UploadManyAsync([], options);
+
+        result.TotalCount.Should().Be(0);
+        result.AllSucceeded.Should().BeTrue();
+        _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UploadManyAsync_CancellationRequested_StopsBatch()
+    {
+        var options = new UploadOptions { StorageProviders = [StorageProviderType.FileSystem] };
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var act = () => _sut.UploadManyAsync([_testFile, _testFile], options, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UploadManyAsync_TwoValidFiles_SavesManifestTwice()
+    {
+        var secondFile = Path.Combine(_tempDir, "test3.bin");
+        File.WriteAllBytes(secondFile, new byte[512]);
+
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [StorageProviderType.FileSystem]
+        };
+
+        await _sut.UploadManyAsync([_testFile, secondFile], options);
+
+        _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task UploadManyAsync_FailedFile_ResultContainsFileName()
+    {
+        var options = new UploadOptions { StorageProviders = [StorageProviderType.FileSystem] };
+
+        var result = await _sut.UploadManyAsync(["/nonexistent/photo.jpg"], options);
+
+        result.Results.Should().ContainSingle();
+        var failedResult = result.Results[0];
+        failedResult.Success.Should().BeFalse();
+        failedResult.FileName.Should().Be("photo.jpg");
+        failedResult.ErrorMessage.Should().NotBeNullOrEmpty();
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDir))

@@ -1,6 +1,8 @@
 using BitScatter.Application.DTOs;
 using BitScatter.Application.Interfaces;
 using BitScatter.Domain.Enums;
+using Microsoft.Extensions.FileSystemGlobbing;
+using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -8,8 +10,8 @@ namespace BitScatter.Cli.Commands;
 
 public class UploadCommandSettings : CommandSettings
 {
-    [CommandArgument(0, "<file-path>")]
-    public string FilePath { get; set; } = string.Empty;
+    [CommandArgument(0, "<file-paths>")]
+    public string[] FilePaths { get; set; } = [];
 
     [CommandOption("-c|--chunk-size")]
     public int ChunkSizeKb { get; set; } = 1024;
@@ -29,14 +31,21 @@ public class UploadCommand : AsyncCommand<UploadCommandSettings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, UploadCommandSettings settings, CancellationToken cancellationToken)
     {
-        var providers = ParseProviders(settings.Providers);
+        var resolvedPaths = ExpandPatterns(settings.FilePaths);
+
+        if (resolvedPaths.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[red]No files matched the provided paths/patterns.[/]");
+            return 1;
+        }
+
         var options = new UploadOptions
         {
             ChunkSizeBytes = settings.ChunkSizeKb * 1024,
-            StorageProviders = providers
+            StorageProviders = ParseProviders(settings.Providers)
         };
 
-        UploadResult? result = null;
+        BatchUploadResult? batchResult = null;
 
         try
         {
@@ -46,7 +55,7 @@ public class UploadCommand : AsyncCommand<UploadCommandSettings>
                     var task = ctx.AddTask("[green]Uploading...[/]");
                     task.IsIndeterminate = true;
 
-                    result = await _uploadService.UploadAsync(settings.FilePath, options);
+                    batchResult = await _uploadService.UploadManyAsync(resolvedPaths, options, cancellationToken);
 
                     task.Value = 100;
                     task.StopTask();
@@ -58,21 +67,63 @@ public class UploadCommand : AsyncCommand<UploadCommandSettings>
             return 1;
         }
 
-        if (result?.Success == true)
+        var table = new Table()
+            .AddColumn("File")
+            .AddColumn("Status")
+            .AddColumn("File ID")
+            .AddColumn("Size")
+            .AddColumn("Chunks");
+
+        foreach (var r in batchResult!.Results)
         {
-            AnsiConsole.MarkupLine("[green]Upload successful![/]");
-            AnsiConsole.Write(new Table()
-                .AddColumn("Property")
-                .AddColumn("Value")
-                .AddRow("File ID", result.FileManifestId.ToString())
-                .AddRow("File Name", result.FileName)
-                .AddRow("Original Size", $"{result.OriginalSize:N0} bytes")
-                .AddRow("Chunks", result.ChunkCount.ToString()));
-            return 0;
+            if (r.Success)
+                table.AddRow(
+                    r.FileName,
+                    "[green]OK[/]",
+                    r.FileManifestId.ToString(),
+                    $"{r.OriginalSize:N0} bytes",
+                    r.ChunkCount.ToString());
+            else
+                table.AddRow(
+                    r.FileName,
+                    "[red]FAILED[/]",
+                    "-",
+                    "-",
+                    r.ErrorMessage ?? "Unknown error");
         }
 
-        AnsiConsole.MarkupLine($"[red]Upload failed: {result?.ErrorMessage}[/]");
-        return 1;
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine(
+            $"[bold]{batchResult.SuccessCount}/{batchResult.TotalCount} file(s) uploaded successfully.[/]");
+
+        return batchResult.AllSucceeded ? 0 : 1;
+    }
+
+    private static IReadOnlyList<string> ExpandPatterns(string[] patterns)
+    {
+        var expanded = new List<string>();
+        var globPatterns = new List<string>();
+
+        foreach (var pattern in patterns)
+        {
+            if (!pattern.Contains('*') && !pattern.Contains('?'))
+                expanded.Add(pattern);
+            else
+                globPatterns.Add(pattern.Replace('\\', '/'));
+        }
+
+        if (globPatterns.Count > 0)
+        {
+            var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
+            foreach (var p in globPatterns)
+                matcher.AddInclude(p);
+
+            var result = matcher.Execute(
+                new DirectoryInfoWrapper(new DirectoryInfo(Directory.GetCurrentDirectory())));
+            expanded.AddRange(result.Files.Select(f => Path.GetFullPath(f.Path)));
+        }
+
+        return expanded;
     }
 
     private static StorageProviderType[]? ParseProviders(string input)

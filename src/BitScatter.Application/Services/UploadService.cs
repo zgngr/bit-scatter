@@ -104,6 +104,39 @@ public class UploadService : IUploadService
         };
     }
 
+    public async Task<BatchUploadResult> UploadManyAsync(
+        IEnumerable<string> filePaths,
+        UploadOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<UploadResult>();
+
+        foreach (var filePath in filePaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                results.Add(await UploadAsync(filePath, options, cancellationToken));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Upload failed for file: {FilePath}", filePath);
+                results.Add(new UploadResult
+                {
+                    FileName = Path.GetFileName(filePath),
+                    Success = false,
+                    ErrorMessage = ex.Message
+                });
+            }
+        }
+
+        _logger.LogInformation("Batch upload complete. {Success}/{Total} files succeeded.",
+            results.Count(r => r.Success), results.Count);
+
+        return new BatchUploadResult { Results = results };
+    }
+
     private IReadOnlyList<IStorageProvider> GetSelectedProviders(StorageProviderType[]? types)
     {
         if (types is null || types.Length == 0)

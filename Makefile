@@ -1,4 +1,4 @@
-.PHONY: build test run-upload run-list docker-up docker-down restore clean
+.PHONY: build test run-upload run-upload-multi run-upload-glob run-list docker-up docker-down restore clean
 
 SOLUTION := BitScatter.slnx
 CLI_PROJECT := src/BitScatter.Cli/BitScatter.Cli.csproj
@@ -20,6 +20,12 @@ clean:
 
 run-upload:
 	dotnet run --project $(CLI_PROJECT) -- upload $(FILE)
+
+run-upload-multi:
+	dotnet run --project $(CLI_PROJECT) -- upload $(FILES)
+
+run-upload-glob:
+	dotnet run --project $(CLI_PROJECT) -- upload $(PATTERN)
 
 run-download:
 	dotnet run --project $(CLI_PROJECT) -- download $(ID) $(OUTPUT)
