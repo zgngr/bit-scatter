@@ -27,6 +27,7 @@ public class BitScatterDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Sha256Checksum).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.ProviderName).IsRequired().HasMaxLength(256);
             entity.Property(e => e.StorageKey).IsRequired().HasMaxLength(2048);
             entity.HasIndex(e => new { e.FileManifestId, e.ChunkIndex });
         });

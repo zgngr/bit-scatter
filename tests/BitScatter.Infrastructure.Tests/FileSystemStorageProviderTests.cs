@@ -13,7 +13,7 @@ public class FileSystemStorageProviderTests : IDisposable
     public FileSystemStorageProviderTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), "bitscatter-tests-" + Guid.NewGuid());
-        _sut = new FileSystemStorageProvider(_tempDir, NullLogger<FileSystemStorageProvider>.Instance);
+        _sut = new FileSystemStorageProvider("test-node", _tempDir, NullLogger<FileSystemStorageProvider>.Instance);
     }
 
     [Fact]

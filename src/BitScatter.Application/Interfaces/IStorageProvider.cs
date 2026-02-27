@@ -4,6 +4,8 @@ namespace BitScatter.Application.Interfaces;
 
 public interface IStorageProvider
 {
+    string Name { get; }
+
     StorageProviderType ProviderType { get; }
 
     Task<string> SaveChunkAsync(Stream data, string key, CancellationToken cancellationToken = default);

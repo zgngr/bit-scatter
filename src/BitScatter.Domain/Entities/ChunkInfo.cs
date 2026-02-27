@@ -10,6 +10,7 @@ public class ChunkInfo
     public long Size { get; set; }
     public string Sha256Checksum { get; set; } = string.Empty;
     public StorageProviderType StorageProviderType { get; set; }
+    public string ProviderName { get; set; } = string.Empty;
     public string StorageKey { get; set; } = string.Empty;
 
     public FileManifest FileManifest { get; set; } = null!;

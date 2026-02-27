@@ -15,7 +15,7 @@ public class UploadCommandSettings : CommandSettings
     public int ChunkSizeKb { get; set; } = 1024;
 
     [CommandOption("-p|--providers")]
-    public string Providers { get; set; } = "filesystem";
+    public string Providers { get; set; } = "all";
 }
 
 public class UploadCommand : AsyncCommand<UploadCommandSettings>
@@ -75,8 +75,11 @@ public class UploadCommand : AsyncCommand<UploadCommandSettings>
         return 1;
     }
 
-    private static StorageProviderType[] ParseProviders(string input)
+    private static StorageProviderType[]? ParseProviders(string input)
     {
+        if (input.Trim().Equals("all", StringComparison.OrdinalIgnoreCase))
+            return null; // null signals UploadService to use all registered providers
+
         return input.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .Select(p => p.ToLowerInvariant() switch
             {

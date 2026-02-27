@@ -11,17 +11,20 @@ public class UploadService : IUploadService
     private readonly IEnumerable<IStorageProvider> _storageProviders;
     private readonly IFileManifestRepository _manifestRepository;
     private readonly IChecksumService _checksumService;
+    private readonly IScatteringStrategy _scatteringStrategy;
     private readonly ILogger<UploadService> _logger;
 
     public UploadService(
         IEnumerable<IStorageProvider> storageProviders,
         IFileManifestRepository manifestRepository,
         IChecksumService checksumService,
+        IScatteringStrategy scatteringStrategy,
         ILogger<UploadService> logger)
     {
         _storageProviders = storageProviders;
         _manifestRepository = manifestRepository;
         _checksumService = checksumService;
+        _scatteringStrategy = scatteringStrategy;
         _logger = logger;
     }
 
@@ -59,17 +62,16 @@ public class UploadService : IUploadService
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Strategies.FixedSizeChunkingStrategy>.Instance);
 
         await using var fileStream = File.OpenRead(filePath);
-        int providerIndex = 0;
 
         await foreach (var chunk in chunkingStrategy.ChunkAsync(fileStream, cancellationToken))
         {
             using (chunk)
             {
-                var provider = selectedProviders[providerIndex % selectedProviders.Count];
+                var provider = _scatteringStrategy.SelectProvider(chunk.Index, selectedProviders);
                 var storageKey = $"{manifest.Id}/{chunk.Index}";
 
-                _logger.LogDebug("Saving chunk {Index} to provider {ProviderType} with key {Key}",
-                    chunk.Index, provider.ProviderType, storageKey);
+                _logger.LogDebug("Saving chunk {Index} to provider {Name} ({ProviderType}) with key {Key}",
+                    chunk.Index, provider.Name, provider.ProviderType, storageKey);
 
                 await provider.SaveChunkAsync(chunk.Data, storageKey, cancellationToken);
 
@@ -80,10 +82,9 @@ public class UploadService : IUploadService
                     Size = chunk.Size,
                     Sha256Checksum = chunk.Sha256Checksum,
                     StorageProviderType = provider.ProviderType,
+                    ProviderName = provider.Name,
                     StorageKey = storageKey
                 });
-
-                providerIndex++;
             }
         }
 
@@ -103,8 +104,17 @@ public class UploadService : IUploadService
         };
     }
 
-    private List<IStorageProvider> GetSelectedProviders(StorageProviderType[] types)
+    private IReadOnlyList<IStorageProvider> GetSelectedProviders(StorageProviderType[]? types)
     {
+        if (types is null || types.Length == 0)
+        {
+            var all = _storageProviders.ToList();
+            if (all.Count == 0)
+                throw new InvalidOperationException("No storage providers are registered.");
+            _logger.LogDebug("Scattering across all {Count} available providers.", all.Count);
+            return all;
+        }
+
         var providers = _storageProviders
             .Where(p => types.Contains(p.ProviderType))
             .ToList();

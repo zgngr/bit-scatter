@@ -15,6 +15,7 @@ public class DatabaseStorageProvider : IStorageProvider
     private readonly ILogger<DatabaseStorageProvider> _logger;
     private readonly AsyncRetryPolicy _retryPolicy;
 
+    public string Name => "database";
     public StorageProviderType ProviderType => StorageProviderType.Database;
 
     public DatabaseStorageProvider(ChunkStorageDbContext context, ILogger<DatabaseStorageProvider> logger)
