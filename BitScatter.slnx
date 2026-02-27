@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/BitScatter.Benchmarks/BitScatter.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/BitScatter.Application/BitScatter.Application.csproj" />
+    <Project Path="src/BitScatter.Cli/BitScatter.Cli.csproj" />
+    <Project Path="src/BitScatter.Domain/BitScatter.Domain.csproj" />
+    <Project Path="src/BitScatter.Infrastructure/BitScatter.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BitScatter.Application.Tests/BitScatter.Application.Tests.csproj" />
+    <Project Path="tests/BitScatter.Domain.Tests/BitScatter.Domain.Tests.csproj" />
+    <Project Path="tests/BitScatter.Infrastructure.Tests/BitScatter.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>
