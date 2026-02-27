@@ -5,4 +5,6 @@ namespace BitScatter.Application.Interfaces;
 public interface IUploadService
 {
     Task<UploadResult> UploadAsync(string filePath, UploadOptions options, CancellationToken cancellationToken = default);
+
+    Task<BatchUploadResult> UploadManyAsync(IEnumerable<string> filePaths, UploadOptions options, CancellationToken cancellationToken = default);
 }
