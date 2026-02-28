@@ -78,6 +78,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IChunkingStrategyFactory, FixedSizeChunkingStrategyFactory>();
         services.AddScoped<IUploadService, UploadService>();
         services.AddScoped<IDownloadService, DownloadService>();
+        services.AddScoped<IDeleteService, DeleteService>();
 
         return services;
     }

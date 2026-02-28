@@ -11,6 +11,26 @@ BitScatter is a .NET Console Application that automatically splits large files i
 ## Key Workflows
 - **Uploading**: Reading a file, calculating size/checksum, selecting a chunking strategy, splitting the file into chunks, saving chunks across storage providers, and saving the overall file manifest metadata.
 - **Downloading**: Retrieving file metadata, locating and fetching chunks across providers, verifying chunk integrity, reassembling the final stream, verifying the final file checksum, and saving to the output path.
+- **Deleting**: Fetching the file manifest, deleting every chunk from its storage provider, then removing the manifest from the database.
+
+## E2E Demo
+
+Run the end-to-end demo to verify the full upload → download → delete pipeline:
+
+```bash
+make demo
+```
+
+The script (`scripts/demo.sh`):
+1. Creates a 3 MB random binary test file
+2. Uploads it with 512 KB chunks (filesystem providers)
+3. Lists all stored files
+4. Downloads the file to a temp path
+5. Verifies the SHA-256 checksum matches the original
+6. Deletes the file and all its chunks from storage
+7. Cleans up all temporary files automatically on exit (even on failure)
+
+> After any significant development, run `make demo` alongside `make test` to confirm E2E integrity.
 
 
 ## Tech Stack

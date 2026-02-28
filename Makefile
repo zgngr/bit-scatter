@@ -44,5 +44,8 @@ docker-down:
 docker-logs:
 	docker-compose logs -f postgres
 
+demo:
+	@bash scripts/demo.sh
+
 format:
 	dotnet format $(SOLUTION)

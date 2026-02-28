@@ -41,6 +41,10 @@ app.Configure(config =>
 
     config.AddCommand<ListCommand>("list")
         .WithDescription("List all uploaded files");
+
+    config.AddCommand<DeleteCommand>("delete")
+        .WithDescription("Delete a file and all its chunks from storage")
+        .WithExample("delete", "550e8400-e29b-41d4-a716-446655440000");
 });
 
 try
