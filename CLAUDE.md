@@ -25,7 +25,7 @@ BitScatter is a .NET Console Application that automatically splits large files i
 ## Important
 
 - Always make sure tests are passing
-- Always work under a git worktree
+- Always work under a git branch
 
 ## Project Structure
 
