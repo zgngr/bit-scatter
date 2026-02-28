@@ -11,16 +11,16 @@ namespace BitScatter.Infrastructure.Storage;
 
 public class DatabaseStorageProvider : IStorageProvider
 {
-    private readonly ChunkStorageDbContext _context;
+    private readonly IDbContextFactory<ChunkStorageDbContext> _factory;
     private readonly ILogger<DatabaseStorageProvider> _logger;
     private readonly AsyncRetryPolicy _retryPolicy;
 
     public string Name => "database";
     public StorageProviderType ProviderType => StorageProviderType.Database;
 
-    public DatabaseStorageProvider(ChunkStorageDbContext context, ILogger<DatabaseStorageProvider> logger)
+    public DatabaseStorageProvider(IDbContextFactory<ChunkStorageDbContext> factory, ILogger<DatabaseStorageProvider> logger)
     {
-        _context = context;
+        _factory = factory;
         _logger = logger;
         _retryPolicy = Policy
             .Handle<Exception>(ex => ex is not OperationCanceledException)
@@ -39,24 +39,26 @@ public class DatabaseStorageProvider : IStorageProvider
 
         await _retryPolicy.ExecuteAsync(async () =>
         {
-            var existing = await _context.ChunkStorages
+            await using var context = await _factory.CreateDbContextAsync(cancellationToken);
+
+            var existing = await context.ChunkStorages
                 .FirstOrDefaultAsync(c => c.StorageKey == key, cancellationToken);
 
             if (existing is not null)
             {
                 existing.Data = bytes;
-                _context.ChunkStorages.Update(existing);
+                context.ChunkStorages.Update(existing);
             }
             else
             {
-                await _context.ChunkStorages.AddAsync(new ChunkStorage
+                await context.ChunkStorages.AddAsync(new ChunkStorage
                 {
                     StorageKey = key,
                     Data = bytes
                 }, cancellationToken);
             }
 
-            await _context.SaveChangesAsync(cancellationToken);
+            await context.SaveChangesAsync(cancellationToken);
         });
 
         _logger.LogDebug("Chunk saved to database: {Key}", key);
@@ -67,10 +69,13 @@ public class DatabaseStorageProvider : IStorageProvider
     {
         _logger.LogDebug("Reading chunk from database with key: {Key}", key);
 
-        var chunk = await _retryPolicy.ExecuteAsync(() =>
-            _context.ChunkStorages
+        var chunk = await _retryPolicy.ExecuteAsync(async () =>
+        {
+            await using var context = await _factory.CreateDbContextAsync(cancellationToken);
+            return await context.ChunkStorages
                 .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.StorageKey == key, cancellationToken)!);
+                .FirstOrDefaultAsync(c => c.StorageKey == key, cancellationToken);
+        });
 
         if (chunk is null)
             throw new ChunkNotFoundException(key);
@@ -81,19 +86,22 @@ public class DatabaseStorageProvider : IStorageProvider
     public async Task DeleteChunkAsync(string key, CancellationToken cancellationToken = default)
     {
         _logger.LogDebug("Deleting chunk from database: {Key}", key);
-        var chunk = await _context.ChunkStorages
+
+        await using var context = await _factory.CreateDbContextAsync(cancellationToken);
+        var chunk = await context.ChunkStorages
             .FirstOrDefaultAsync(c => c.StorageKey == key, cancellationToken);
 
         if (chunk is not null)
         {
-            _context.ChunkStorages.Remove(chunk);
-            await _context.SaveChangesAsync(cancellationToken);
+            context.ChunkStorages.Remove(chunk);
+            await context.SaveChangesAsync(cancellationToken);
         }
     }
 
     public async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
     {
-        return await _context.ChunkStorages
+        await using var context = await _factory.CreateDbContextAsync(cancellationToken);
+        return await context.ChunkStorages
             .AnyAsync(c => c.StorageKey == key, cancellationToken);
     }
 }

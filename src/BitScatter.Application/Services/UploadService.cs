@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using BitScatter.Application.DTOs;
 using BitScatter.Application.Interfaces;
 using BitScatter.Domain.Entities;
@@ -129,15 +130,21 @@ public class UploadService : IUploadService
         Func<string, IProgress<(int completed, int total)>?>? progressFactory = null,
         CancellationToken cancellationToken = default)
     {
-        var results = new List<UploadResult>();
+        var results = new ConcurrentBag<UploadResult>();
 
-        foreach (var filePath in filePaths)
+        await Parallel.ForEachAsync(filePaths, new ParallelOptions
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
+            MaxDegreeOfParallelism = Environment.ProcessorCount,
+            CancellationToken = cancellationToken
+        }, async (filePath, ct) =>
+        {
             try
             {
-                results.Add(await UploadAsync(filePath, options, progressFactory?.Invoke(filePath), cancellationToken));
+                results.Add(await UploadAsync(filePath, options, progressFactory?.Invoke(filePath), ct));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -149,12 +156,14 @@ public class UploadService : IUploadService
                     ErrorMessage = ex.Message
                 });
             }
-        }
+        });
+
+        var resultList = results.ToList();
 
         _logger.LogInformation("Batch upload complete. {Success}/{Total} files succeeded.",
-            results.Count(r => r.Success), results.Count);
+            resultList.Count(r => r.Success), resultList.Count);
 
-        return new BatchUploadResult { Results = results };
+        return new BatchUploadResult { Results = resultList };
     }
 
     private async Task RollbackChunksAsync(IReadOnlyList<(IStorageProvider Provider, string Key)> savedChunks)

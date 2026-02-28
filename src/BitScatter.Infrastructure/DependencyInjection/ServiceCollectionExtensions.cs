@@ -23,17 +23,17 @@ public static class ServiceCollectionExtensions
 
         var chunkConnectionString = configuration.GetConnectionString("ChunkStorage");
 
-        services.AddDbContext<BitScatterDbContext>(options =>
+        services.AddDbContextFactory<BitScatterDbContext>(options =>
             options.UseSqlite(metadataConnectionString));
 
         if (!string.IsNullOrEmpty(chunkConnectionString))
         {
-            services.AddDbContext<ChunkStorageDbContext>(options =>
+            services.AddDbContextFactory<ChunkStorageDbContext>(options =>
                 options.UseNpgsql(chunkConnectionString));
 
             services.AddScoped<IStorageProvider>(sp =>
                 new DatabaseStorageProvider(
-                    sp.GetRequiredService<ChunkStorageDbContext>(),
+                    sp.GetRequiredService<IDbContextFactory<ChunkStorageDbContext>>(),
                     sp.GetRequiredService<ILogger<DatabaseStorageProvider>>()));
         }
 
@@ -84,12 +84,15 @@ public static class ServiceCollectionExtensions
 
     public static async Task MigrateAsync(this IServiceProvider serviceProvider)
     {
-        using var scope = serviceProvider.CreateScope();
-        var metaDb = scope.ServiceProvider.GetRequiredService<BitScatterDbContext>();
+        var metaFactory = serviceProvider.GetRequiredService<IDbContextFactory<BitScatterDbContext>>();
+        await using var metaDb = await metaFactory.CreateDbContextAsync();
         await metaDb.Database.EnsureCreatedAsync();
 
-        var chunkDb = scope.ServiceProvider.GetService<ChunkStorageDbContext>();
-        if (chunkDb is not null)
+        var chunkFactory = serviceProvider.GetService<IDbContextFactory<ChunkStorageDbContext>>();
+        if (chunkFactory is not null)
+        {
+            await using var chunkDb = await chunkFactory.CreateDbContextAsync();
             await chunkDb.Database.EnsureCreatedAsync();
+        }
     }
 }
