@@ -1,4 +1,4 @@
-.PHONY: build test run-upload run-upload-multi run-upload-glob run-list docker-up docker-down restore clean
+.PHONY: build test run-upload run-upload-multi run-upload-glob run-list run-delete docker-up docker-down restore clean
 
 SOLUTION := BitScatter.slnx
 CLI_PROJECT := src/BitScatter.Cli/BitScatter.Cli.csproj
@@ -32,6 +32,9 @@ run-download:
 
 run-list:
 	dotnet run --project $(CLI_PROJECT) -- list
+
+run-delete:
+	dotnet run --project $(CLI_PROJECT) -- delete $(ID)
 
 docker-up:
 	docker-compose up -d
