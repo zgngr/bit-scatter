@@ -319,6 +319,58 @@ public class UploadServiceTests : IDisposable
         failedResult.ErrorMessage.Should().NotBeNullOrEmpty();
     }
 
+    [Fact]
+    public async Task UploadAsync_ProviderFailsMidUpload_RollsBackSavedChunks()
+    {
+        // Arrange: 2-chunk file (2048 bytes / 1024 chunk size); second save throws
+        var providerMock = new Mock<IStorageProvider>();
+        providerMock.SetupGet(p => p.Name).Returns("node1");
+        providerMock.SetupGet(p => p.ProviderType).Returns(StorageProviderType.FileSystem);
+        providerMock
+            .SetupSequence(p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("chunk0")
+            .ThrowsAsync(new IOException("Storage failure"));
+
+        var sut = new UploadService(
+            [providerMock.Object],
+            _repoMock.Object,
+            _checksumMock.Object,
+            new RoundRobinScatteringStrategy(),
+            NullLogger<UploadService>.Instance);
+
+        var options = new UploadOptions { ChunkSizeBytes = 1024, StorageProviders = [StorageProviderType.FileSystem] };
+
+        // Act
+        var act = () => sut.UploadAsync(_testFile, options);
+        await act.Should().ThrowAsync<IOException>();
+
+        // Assert: first chunk was rolled back; manifest was never saved
+        providerMock.Verify(
+            p => p.DeleteChunkAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UploadAsync_ManifestSaveFails_RollsBackAllChunks()
+    {
+        // Arrange: all chunks save OK, but manifest save throws
+        _repoMock
+            .Setup(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("DB unavailable"));
+
+        var options = new UploadOptions { ChunkSizeBytes = 1024, StorageProviders = [StorageProviderType.FileSystem] };
+
+        // Act
+        var act = () => _sut.UploadAsync(_testFile, options);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        // Assert: both chunks were deleted (rolled back)
+        _providerMock.Verify(
+            p => p.DeleteChunkAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDir))

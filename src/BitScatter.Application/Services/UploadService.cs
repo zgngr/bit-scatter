@@ -64,36 +64,49 @@ public class UploadService : IUploadService
 
         var estimatedTotal = (int)Math.Max(1, Math.Ceiling((double)fileInfo.Length / options.ChunkSizeBytes));
 
-        await using var fileStream = File.OpenRead(filePath);
+        var savedChunks = new List<(IStorageProvider Provider, string Key)>();
 
-        await foreach (var chunk in chunkingStrategy.ChunkAsync(fileStream, cancellationToken))
+        try
         {
-            using (chunk)
+            await using var fileStream = File.OpenRead(filePath);
+
+            await foreach (var chunk in chunkingStrategy.ChunkAsync(fileStream, cancellationToken))
             {
-                var provider = _scatteringStrategy.SelectProvider(chunk.Index, selectedProviders);
-                var storageKey = $"{manifest.Id}/{chunk.Index}";
-
-                _logger.LogDebug("Saving chunk {Index} to provider {Name} ({ProviderType}) with key {Key}",
-                    chunk.Index, provider.Name, provider.ProviderType, storageKey);
-
-                await provider.SaveChunkAsync(chunk.Data, storageKey, cancellationToken);
-
-                manifest.Chunks.Add(new ChunkInfo
+                using (chunk)
                 {
-                    FileManifestId = manifest.Id,
-                    ChunkIndex = chunk.Index,
-                    Size = chunk.Size,
-                    Sha256Checksum = chunk.Sha256Checksum,
-                    StorageProviderType = provider.ProviderType,
-                    ProviderName = provider.Name,
-                    StorageKey = storageKey
-                });
+                    var provider = _scatteringStrategy.SelectProvider(chunk.Index, selectedProviders);
+                    var storageKey = $"{manifest.Id}/{chunk.Index}";
 
-                progress?.Report((manifest.Chunks.Count, estimatedTotal));
+                    _logger.LogDebug("Saving chunk {Index} to provider {Name} ({ProviderType}) with key {Key}",
+                        chunk.Index, provider.Name, provider.ProviderType, storageKey);
+
+                    await provider.SaveChunkAsync(chunk.Data, storageKey, cancellationToken);
+                    savedChunks.Add((provider, storageKey));
+
+                    manifest.Chunks.Add(new ChunkInfo
+                    {
+                        FileManifestId = manifest.Id,
+                        ChunkIndex = chunk.Index,
+                        Size = chunk.Size,
+                        Sha256Checksum = chunk.Sha256Checksum,
+                        StorageProviderType = provider.ProviderType,
+                        ProviderName = provider.Name,
+                        StorageKey = storageKey
+                    });
+
+                    progress?.Report((manifest.Chunks.Count, estimatedTotal));
+                }
             }
-        }
 
-        await _manifestRepository.SaveAsync(manifest, cancellationToken);
+            await _manifestRepository.SaveAsync(manifest, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Upload failed for file: {FilePath}. Rolling back {Count} saved chunk(s).",
+                filePath, savedChunks.Count);
+            await RollbackChunksAsync(savedChunks);
+            throw;
+        }
 
         _logger.LogInformation(
             "Upload complete. File: {FileName}, Id: {ManifestId}, Chunks: {ChunkCount}",
@@ -141,6 +154,24 @@ public class UploadService : IUploadService
             results.Count(r => r.Success), results.Count);
 
         return new BatchUploadResult { Results = results };
+    }
+
+    private async Task RollbackChunksAsync(IReadOnlyList<(IStorageProvider Provider, string Key)> savedChunks)
+    {
+        foreach (var (provider, key) in savedChunks)
+        {
+            try
+            {
+                await provider.DeleteChunkAsync(key);
+                _logger.LogDebug("Rolled back chunk {Key} from provider {Name}.", key, provider.Name);
+            }
+            catch (Exception cleanupEx)
+            {
+                _logger.LogWarning(cleanupEx,
+                    "Failed to roll back chunk {Key} from provider {Name}. The chunk may be orphaned.",
+                    key, provider.Name);
+            }
+        }
     }
 
     private IReadOnlyList<IStorageProvider> GetSelectedProviders(StorageProviderType[]? types)
