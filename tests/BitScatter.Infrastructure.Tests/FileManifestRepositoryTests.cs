@@ -8,9 +8,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace BitScatter.Infrastructure.Tests;
 
-public class FileManifestRepositoryTests : IDisposable
+public class FileManifestRepositoryTests
 {
-    private readonly BitScatterDbContext _context;
     private readonly FileManifestRepository _sut;
 
     public FileManifestRepositoryTests()
@@ -19,8 +18,7 @@ public class FileManifestRepositoryTests : IDisposable
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
 
-        _context = new BitScatterDbContext(options);
-        _sut = new FileManifestRepository(_context, NullLogger<FileManifestRepository>.Instance);
+        _sut = new FileManifestRepository(new TestDbContextFactory(options), NullLogger<FileManifestRepository>.Instance);
     }
 
     [Fact]
@@ -101,8 +99,9 @@ public class FileManifestRepositoryTests : IDisposable
         all.Should().HaveCount(2);
     }
 
-    public void Dispose()
+    private sealed class TestDbContextFactory(DbContextOptions<BitScatterDbContext> options)
+        : IDbContextFactory<BitScatterDbContext>
     {
-        _context.Dispose();
+        public BitScatterDbContext CreateDbContext() => new(options);
     }
 }
