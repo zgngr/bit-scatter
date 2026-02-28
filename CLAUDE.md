@@ -46,6 +46,7 @@ The script (`scripts/demo.sh`):
 
 - Always make sure tests are passing
 - Always work under a git branch
+- Always keep README.md file up-to-date
 
 ## Project Structure
 ```
