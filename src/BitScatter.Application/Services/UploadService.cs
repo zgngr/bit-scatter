@@ -12,6 +12,7 @@ public class UploadService : IUploadService
     private readonly IFileManifestRepository _manifestRepository;
     private readonly IChecksumService _checksumService;
     private readonly IScatteringStrategy _scatteringStrategy;
+    private readonly IChunkingStrategyFactory _chunkingStrategyFactory;
     private readonly ILogger<UploadService> _logger;
 
     public UploadService(
@@ -19,12 +20,14 @@ public class UploadService : IUploadService
         IFileManifestRepository manifestRepository,
         IChecksumService checksumService,
         IScatteringStrategy scatteringStrategy,
+        IChunkingStrategyFactory chunkingStrategyFactory,
         ILogger<UploadService> logger)
     {
         _storageProviders = storageProviders;
         _manifestRepository = manifestRepository;
         _checksumService = checksumService;
         _scatteringStrategy = scatteringStrategy;
+        _chunkingStrategyFactory = chunkingStrategyFactory;
         _logger = logger;
     }
 
@@ -58,9 +61,7 @@ public class UploadService : IUploadService
         };
 
         var selectedProviders = GetSelectedProviders(options.StorageProviders);
-        var chunkingStrategy = new Strategies.FixedSizeChunkingStrategy(
-            options.ChunkSizeBytes,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<Strategies.FixedSizeChunkingStrategy>.Instance);
+        var chunkingStrategy = _chunkingStrategyFactory.Create(options.ChunkSizeBytes);
 
         var estimatedTotal = (int)Math.Max(1, Math.Ceiling((double)fileInfo.Length / options.ChunkSizeBytes));
 

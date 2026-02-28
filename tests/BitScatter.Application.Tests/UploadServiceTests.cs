@@ -17,6 +17,7 @@ public class UploadServiceTests : IDisposable
     private readonly Mock<IFileManifestRepository> _repoMock;
     private readonly Mock<IStorageProvider> _providerMock;
     private readonly Mock<IChecksumService> _checksumMock;
+    private readonly IChunkingStrategyFactory _chunkingFactory;
     private readonly UploadService _sut;
 
     public UploadServiceTests()
@@ -43,11 +44,15 @@ public class UploadServiceTests : IDisposable
             .Setup(p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Stream s, string key, CancellationToken ct) => key);
 
+        _chunkingFactory = new FixedSizeChunkingStrategyFactory(
+            NullLogger<FixedSizeChunkingStrategy>.Instance);
+
         _sut = new UploadService(
             [_providerMock.Object],
             _repoMock.Object,
             _checksumMock.Object,
             new RoundRobinScatteringStrategy(),
+            _chunkingFactory,
             NullLogger<UploadService>.Instance);
     }
 
@@ -136,6 +141,7 @@ public class UploadServiceTests : IDisposable
             _repoMock.Object,
             _checksumMock.Object,
             new RoundRobinScatteringStrategy(),
+            _chunkingFactory,
             NullLogger<UploadService>.Instance);
 
         var options = new UploadOptions
@@ -173,6 +179,7 @@ public class UploadServiceTests : IDisposable
             _repoMock.Object,
             _checksumMock.Object,
             new RoundRobinScatteringStrategy(),
+            _chunkingFactory,
             NullLogger<UploadService>.Instance);
 
         var options = new UploadOptions
@@ -336,6 +343,7 @@ public class UploadServiceTests : IDisposable
             _repoMock.Object,
             _checksumMock.Object,
             new RoundRobinScatteringStrategy(),
+            _chunkingFactory,
             NullLogger<UploadService>.Instance);
 
         var options = new UploadOptions { ChunkSizeBytes = 1024, StorageProviders = [StorageProviderType.FileSystem] };
