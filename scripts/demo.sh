@@ -33,7 +33,12 @@ echo "[2/6] Uploading with 512 KB chunks (filesystem providers only)..."
 UPLOAD_OUTPUT=$($CLI upload "$DEMO_FILE" --chunk-size 512 --providers filesystem 2>/dev/null)
 echo "$UPLOAD_OUTPUT"
 
-FILE_ID=$(echo "$UPLOAD_OUTPUT" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+# Spectre.Console may wrap the UUID across two table rows in narrow (non-TTY) terminals.
+# Try a direct match first; if that fails, join adjacent hex-dash fragments and retry.
+FILE_ID=$(echo "$UPLOAD_OUTPUT" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
+if [ -z "$FILE_ID" ]; then
+    FILE_ID=$(printf '%s\n' "$UPLOAD_OUTPUT" | { grep -oE '[0-9a-f-]{8,36}' || true; } | tr -d '\n' | { grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true; } | head -1)
+fi
 if [ -z "$FILE_ID" ]; then
     echo "ERROR: Could not extract File ID from upload output." >&2
     exit 1
