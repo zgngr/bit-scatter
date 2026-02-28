@@ -128,6 +128,69 @@ public class DownloadServiceTests : IDisposable
         await act.Should().ThrowAsync<ChecksumMismatchException>();
     }
 
+    [Fact]
+    public async Task DownloadAsync_ChunkChecksumMismatch_DeletesPartialOutputFile()
+    {
+        var manifest = CreateManifest();
+        manifest.Chunks[0].Sha256Checksum = "intentionally-wrong-checksum";
+
+        _repoMock.Setup(r => r.GetByIdAsync(manifest.Id, It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(manifest);
+        _providerMock
+            .Setup(p => p.ReadChunkAsync($"{manifest.Id}/0", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MemoryStream(Chunk0));
+
+        var outputPath = Path.Combine(_tempDir, "partial_chunk_fail.bin");
+
+        await Assert.ThrowsAsync<ChecksumMismatchException>(
+            () => _sut.DownloadAsync(manifest.Id, outputPath));
+
+        File.Exists(outputPath).Should().BeFalse("partial file must be deleted on chunk checksum failure");
+    }
+
+    [Fact]
+    public async Task DownloadAsync_FinalChecksumMismatch_DeletesPartialOutputFile()
+    {
+        var manifest = CreateManifest();
+        _repoMock.Setup(r => r.GetByIdAsync(manifest.Id, It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(manifest);
+        _providerMock
+            .Setup(p => p.ReadChunkAsync($"{manifest.Id}/0", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MemoryStream(Chunk0));
+        _providerMock
+            .Setup(p => p.ReadChunkAsync($"{manifest.Id}/1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MemoryStream(Chunk1));
+
+        _checksumMock
+            .Setup(c => c.ComputeSha256Async(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("wrong-final-checksum");
+
+        var outputPath = Path.Combine(_tempDir, "partial_final_fail.bin");
+
+        await Assert.ThrowsAsync<ChecksumMismatchException>(
+            () => _sut.DownloadAsync(manifest.Id, outputPath));
+
+        File.Exists(outputPath).Should().BeFalse("partial file must be deleted on final checksum failure");
+    }
+
+    [Fact]
+    public async Task DownloadAsync_ProviderThrows_DeletesPartialOutputFile()
+    {
+        var manifest = CreateManifest();
+        _repoMock.Setup(r => r.GetByIdAsync(manifest.Id, It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(manifest);
+        _providerMock
+            .Setup(p => p.ReadChunkAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("Storage failure"));
+
+        var outputPath = Path.Combine(_tempDir, "partial_provider_fail.bin");
+
+        await Assert.ThrowsAsync<IOException>(
+            () => _sut.DownloadAsync(manifest.Id, outputPath));
+
+        File.Exists(outputPath).Should().BeFalse("partial file must be deleted when provider throws");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDir))

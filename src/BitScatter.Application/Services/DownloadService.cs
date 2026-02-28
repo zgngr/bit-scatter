@@ -42,54 +42,71 @@ public class DownloadService : IDownloadService
         if (!string.IsNullOrEmpty(outputDir))
             Directory.CreateDirectory(outputDir);
 
-        await using var outputStream = File.Create(outputPath);
-
-        var orderedChunks = manifest.Chunks.OrderBy(c => c.ChunkIndex).ToList();
-        int totalChunks = orderedChunks.Count;
-        int completedChunks = 0;
-        var buf = new byte[81_920];
-
-        foreach (var chunkInfo in orderedChunks)
+        var outputStream = File.Create(outputPath);
+        bool downloadSucceeded = false;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var orderedChunks = manifest.Chunks.OrderBy(c => c.ChunkIndex).ToList();
+            int totalChunks = orderedChunks.Count;
+            int completedChunks = 0;
+            var buf = new byte[81_920];
 
-            var provider = GetProvider(chunkInfo.ProviderName, chunkInfo.StorageProviderType);
-
-            _logger.LogDebug("Reading chunk {Index} from provider {Name} ({ProviderType}) with key {Key}",
-                chunkInfo.ChunkIndex, chunkInfo.ProviderName, chunkInfo.StorageProviderType, chunkInfo.StorageKey);
-
-            await using var chunkStream = await provider.ReadChunkAsync(chunkInfo.StorageKey, cancellationToken);
-
-            using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            int read;
-            while ((read = await chunkStream.ReadAsync(buf, cancellationToken)) > 0)
+            foreach (var chunkInfo in orderedChunks)
             {
-                sha256.AppendData(buf, 0, read);
-                await outputStream.WriteAsync(buf.AsMemory(0, read), cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var provider = GetProvider(chunkInfo.ProviderName, chunkInfo.StorageProviderType);
+
+                _logger.LogDebug("Reading chunk {Index} from provider {Name} ({ProviderType}) with key {Key}",
+                    chunkInfo.ChunkIndex, chunkInfo.ProviderName, chunkInfo.StorageProviderType, chunkInfo.StorageKey);
+
+                await using var chunkStream = await provider.ReadChunkAsync(chunkInfo.StorageKey, cancellationToken);
+
+                using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                int read;
+                while ((read = await chunkStream.ReadAsync(buf, cancellationToken)) > 0)
+                {
+                    sha256.AppendData(buf, 0, read);
+                    await outputStream.WriteAsync(buf.AsMemory(0, read), cancellationToken);
+                }
+
+                var actualChecksum = Convert.ToHexString(sha256.GetCurrentHash()).ToLowerInvariant();
+                if (!string.Equals(actualChecksum, chunkInfo.Sha256Checksum, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ChecksumMismatchException(
+                        $"Chunk {chunkInfo.ChunkIndex} integrity check failed.",
+                        chunkInfo.Sha256Checksum,
+                        actualChecksum);
+                }
+
+                progress?.Report((++completedChunks, totalChunks));
             }
 
-            var actualChecksum = Convert.ToHexString(sha256.GetCurrentHash()).ToLowerInvariant();
-            if (!string.Equals(actualChecksum, chunkInfo.Sha256Checksum, StringComparison.OrdinalIgnoreCase))
+            await outputStream.FlushAsync(cancellationToken);
+            outputStream.Seek(0, SeekOrigin.Begin);
+
+            var finalChecksum = await _checksumService.ComputeSha256Async(outputStream, cancellationToken);
+            if (!string.Equals(finalChecksum, manifest.Sha256Checksum, StringComparison.OrdinalIgnoreCase))
             {
                 throw new ChecksumMismatchException(
-                    $"Chunk {chunkInfo.ChunkIndex} integrity check failed.",
-                    chunkInfo.Sha256Checksum,
-                    actualChecksum);
+                    "Final file integrity check failed.",
+                    manifest.Sha256Checksum,
+                    finalChecksum);
             }
 
-            progress?.Report((++completedChunks, totalChunks));
+            downloadSucceeded = true;
         }
-
-        await outputStream.FlushAsync(cancellationToken);
-        outputStream.Seek(0, SeekOrigin.Begin);
-
-        var finalChecksum = await _checksumService.ComputeSha256Async(outputStream, cancellationToken);
-        if (!string.Equals(finalChecksum, manifest.Sha256Checksum, StringComparison.OrdinalIgnoreCase))
+        finally
         {
-            throw new ChecksumMismatchException(
-                "Final file integrity check failed.",
-                manifest.Sha256Checksum,
-                finalChecksum);
+            await outputStream.DisposeAsync();
+            if (!downloadSucceeded && File.Exists(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete partial output file: {OutputPath}", outputPath);
+                }
+            }
         }
 
         _logger.LogInformation(
