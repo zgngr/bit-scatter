@@ -48,7 +48,7 @@ public class FileSystemStorageProvider : IStorageProvider
         return key;
     }
 
-    public async Task<Stream> ReadChunkAsync(string key, CancellationToken cancellationToken = default)
+    public Task<Stream> ReadChunkAsync(string key, CancellationToken cancellationToken = default)
     {
         var filePath = GetFilePath(key);
 
@@ -57,15 +57,7 @@ public class FileSystemStorageProvider : IStorageProvider
 
         _logger.LogDebug("Reading chunk from filesystem: {FilePath}", filePath);
 
-        var memoryStream = new MemoryStream();
-        await _retryPolicy.ExecuteAsync(async () =>
-        {
-            await using var fileStream = File.OpenRead(filePath);
-            await fileStream.CopyToAsync(memoryStream, cancellationToken);
-        });
-
-        memoryStream.Seek(0, SeekOrigin.Begin);
-        return memoryStream;
+        return Task.FromResult<Stream>(File.OpenRead(filePath));
     }
 
     public Task DeleteChunkAsync(string key, CancellationToken cancellationToken = default)

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using BitScatter.Application.Interfaces;
 using BitScatter.Application.Services;
 using BitScatter.Domain.Entities;
@@ -19,8 +20,8 @@ public class DownloadServiceTests : IDisposable
 
     private static readonly byte[] Chunk0 = [1, 2, 3, 4];
     private static readonly byte[] Chunk1 = [5, 6, 7, 8];
-    private const string Chunk0Checksum = "chunk0chk";
-    private const string Chunk1Checksum = "chunk1chk";
+    private static readonly string Chunk0Checksum = Convert.ToHexString(SHA256.HashData(Chunk0)).ToLowerInvariant();
+    private static readonly string Chunk1Checksum = Convert.ToHexString(SHA256.HashData(Chunk1)).ToLowerInvariant();
     private const string FileChecksum = "fileChk";
 
     public DownloadServiceTests()
@@ -34,12 +35,6 @@ public class DownloadServiceTests : IDisposable
 
         _providerMock.SetupGet(p => p.ProviderType).Returns(StorageProviderType.FileSystem);
 
-        _checksumMock
-            .Setup(c => c.ComputeSha256(Chunk0))
-            .Returns(Chunk0Checksum);
-        _checksumMock
-            .Setup(c => c.ComputeSha256(Chunk1))
-            .Returns(Chunk1Checksum);
         _checksumMock
             .Setup(c => c.ComputeSha256Async(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(FileChecksum);
@@ -119,12 +114,10 @@ public class DownloadServiceTests : IDisposable
     public async Task DownloadAsync_ChunkChecksumMismatch_Throws()
     {
         var manifest = CreateManifest();
+        manifest.Chunks[0].Sha256Checksum = "intentionally-wrong-checksum";
+
         _repoMock.Setup(r => r.GetByIdAsync(manifest.Id, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(manifest);
-
-        _checksumMock
-            .Setup(c => c.ComputeSha256(Chunk0))
-            .Returns("wrongchecksum");
 
         _providerMock
             .Setup(p => p.ReadChunkAsync($"{manifest.Id}/0", It.IsAny<CancellationToken>()))
