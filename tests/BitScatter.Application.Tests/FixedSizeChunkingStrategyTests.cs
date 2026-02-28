@@ -1,3 +1,4 @@
+using BitScatter.Application.DTOs;
 using BitScatter.Application.Strategies;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -101,5 +102,19 @@ public class FixedSizeChunkingStrategyTests
     {
         var act = () => CreateStrategy(0);
         act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Constructor_ExceedsMaxChunkSize_Throws()
+    {
+        var act = () => CreateStrategy(UploadOptions.MaxChunkSizeBytes + 1);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Constructor_ExactlyMaxChunkSize_DoesNotThrow()
+    {
+        var act = () => CreateStrategy(UploadOptions.MaxChunkSizeBytes);
+        act.Should().NotThrow();
     }
 }

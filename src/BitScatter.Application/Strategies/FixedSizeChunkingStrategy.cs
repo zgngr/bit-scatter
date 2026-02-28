@@ -15,6 +15,9 @@ public class FixedSizeChunkingStrategy : IChunkingStrategy
     {
         if (chunkSizeBytes <= 0)
             throw new ArgumentOutOfRangeException(nameof(chunkSizeBytes), "Chunk size must be positive.");
+        if (chunkSizeBytes > UploadOptions.MaxChunkSizeBytes)
+            throw new ArgumentOutOfRangeException(nameof(chunkSizeBytes),
+                $"Chunk size must not exceed {UploadOptions.MaxChunkSizeBytes} bytes (512 MB).");
 
         _chunkSizeBytes = chunkSizeBytes;
         _logger = logger;
