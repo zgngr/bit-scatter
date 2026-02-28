@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using BitScatter.Application.DTOs;
 using BitScatter.Application.Interfaces;
 using BitScatter.Domain.Enums;
@@ -46,6 +47,7 @@ public class DownloadService : IDownloadService
         var orderedChunks = manifest.Chunks.OrderBy(c => c.ChunkIndex).ToList();
         int totalChunks = orderedChunks.Count;
         int completedChunks = 0;
+        var buf = new byte[81_920];
 
         foreach (var chunkInfo in orderedChunks)
         {
@@ -58,10 +60,15 @@ public class DownloadService : IDownloadService
 
             await using var chunkStream = await provider.ReadChunkAsync(chunkInfo.StorageKey, cancellationToken);
 
-            var chunkBytes = new byte[chunkStream.Length];
-            await chunkStream.ReadExactlyAsync(chunkBytes, cancellationToken);
+            using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            int read;
+            while ((read = await chunkStream.ReadAsync(buf, cancellationToken)) > 0)
+            {
+                sha256.AppendData(buf, 0, read);
+                await outputStream.WriteAsync(buf.AsMemory(0, read), cancellationToken);
+            }
 
-            var actualChecksum = _checksumService.ComputeSha256(chunkBytes);
+            var actualChecksum = Convert.ToHexString(sha256.GetCurrentHash()).ToLowerInvariant();
             if (!string.Equals(actualChecksum, chunkInfo.Sha256Checksum, StringComparison.OrdinalIgnoreCase))
             {
                 throw new ChecksumMismatchException(
@@ -69,8 +76,6 @@ public class DownloadService : IDownloadService
                     chunkInfo.Sha256Checksum,
                     actualChecksum);
             }
-
-            await outputStream.WriteAsync(chunkBytes, cancellationToken);
 
             progress?.Report((++completedChunks, totalChunks));
         }
