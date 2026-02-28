@@ -28,6 +28,7 @@ public class DownloadService : IDownloadService
     public async Task<DownloadResult> DownloadAsync(
         Guid fileManifestId,
         string outputPath,
+        IProgress<(int completed, int total)>? progress = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Starting download for manifest: {ManifestId}", fileManifestId);
@@ -43,6 +44,8 @@ public class DownloadService : IDownloadService
         await using var outputStream = File.Create(outputPath);
 
         var orderedChunks = manifest.Chunks.OrderBy(c => c.ChunkIndex).ToList();
+        int totalChunks = orderedChunks.Count;
+        int completedChunks = 0;
 
         foreach (var chunkInfo in orderedChunks)
         {
@@ -68,6 +71,8 @@ public class DownloadService : IDownloadService
             }
 
             await outputStream.WriteAsync(chunkBytes, cancellationToken);
+
+            progress?.Report((++completedChunks, totalChunks));
         }
 
         await outputStream.FlushAsync(cancellationToken);

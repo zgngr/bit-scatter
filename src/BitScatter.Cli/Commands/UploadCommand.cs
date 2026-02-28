@@ -52,13 +52,33 @@ public class UploadCommand : AsyncCommand<UploadCommandSettings>
             await AnsiConsole.Progress()
                 .StartAsync(async ctx =>
                 {
-                    var task = ctx.AddTask("[green]Uploading...[/]");
-                    task.IsIndeterminate = true;
+                    var tasks = resolvedPaths.ToDictionary(
+                        path => path,
+                        path =>
+                        {
+                            var fi = new FileInfo(path);
+                            var estimated = (int)Math.Max(1, Math.Ceiling((double)fi.Length / options.ChunkSizeBytes));
+                            return ctx.AddTask(Path.GetFileName(path), maxValue: estimated);
+                        });
 
-                    batchResult = await _uploadService.UploadManyAsync(resolvedPaths, options, cancellationToken);
+                    batchResult = await _uploadService.UploadManyAsync(
+                        resolvedPaths,
+                        options,
+                        progressFactory: path => new Progress<(int completed, int total)>(p =>
+                        {
+                            if (tasks.TryGetValue(path, out var t))
+                            {
+                                t.MaxValue = p.total;
+                                t.Value = p.completed;
+                            }
+                        }),
+                        cancellationToken: cancellationToken);
 
-                    task.Value = 100;
-                    task.StopTask();
+                    foreach (var t in tasks.Values)
+                    {
+                        t.Value = t.MaxValue;
+                        t.StopTask();
+                    }
                 });
         }
         catch (Exception ex)

@@ -13,8 +13,6 @@ var configuration = new ConfigurationBuilder()
 
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(configuration)
-    .WriteTo.Console()
-    .WriteTo.File("logs/bitscatter-.log", rollingInterval: RollingInterval.Day)
     .CreateLogger();
 
 var services = new ServiceCollection();
