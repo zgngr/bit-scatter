@@ -28,6 +28,7 @@ BitScatter is a .NET Console Application that automatically splits large files i
 - Always work under a git branch
 
 ## Project Structure
+```
 
 bit-scatter/                              <-- The root of your Git repository
 ├── .vscode/                              # (Optional) IDE specific settings
@@ -77,7 +78,7 @@ bit-scatter/                              <-- The root of your Git repository
 └── scripts/                              
     ├── deploy.sh
     └── seed-database.sql
-
+```
 
 ## Coding Conventions & Guidelines
 1. **Performance & Memory**: 
