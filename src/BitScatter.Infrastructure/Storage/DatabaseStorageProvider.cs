@@ -87,15 +87,18 @@ public class DatabaseStorageProvider : IStorageProvider
     {
         _logger.LogDebug("Deleting chunk from database: {Key}", key);
 
-        await using var context = await _factory.CreateDbContextAsync(cancellationToken);
-        var chunk = await context.ChunkStorages
-            .FirstOrDefaultAsync(c => c.StorageKey == key, cancellationToken);
-
-        if (chunk is not null)
+        await _retryPolicy.ExecuteAsync(async () =>
         {
-            context.ChunkStorages.Remove(chunk);
-            await context.SaveChangesAsync(cancellationToken);
-        }
+            await using var context = await _factory.CreateDbContextAsync(cancellationToken);
+            var chunk = await context.ChunkStorages
+                .FirstOrDefaultAsync(c => c.StorageKey == key, cancellationToken);
+
+            if (chunk is not null)
+            {
+                context.ChunkStorages.Remove(chunk);
+                await context.SaveChangesAsync(cancellationToken);
+            }
+        });
     }
 
     public async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
