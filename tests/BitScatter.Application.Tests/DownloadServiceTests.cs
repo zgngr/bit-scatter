@@ -15,14 +15,13 @@ public class DownloadServiceTests : IDisposable
     private readonly string _tempDir;
     private readonly Mock<IFileManifestRepository> _repoMock;
     private readonly Mock<IStorageProvider> _providerMock;
-    private readonly Mock<IChecksumService> _checksumMock;
     private readonly DownloadService _sut;
 
     private static readonly byte[] Chunk0 = [1, 2, 3, 4];
     private static readonly byte[] Chunk1 = [5, 6, 7, 8];
     private static readonly string Chunk0Checksum = Convert.ToHexString(SHA256.HashData(Chunk0)).ToLowerInvariant();
     private static readonly string Chunk1Checksum = Convert.ToHexString(SHA256.HashData(Chunk1)).ToLowerInvariant();
-    private const string FileChecksum = "fileChk";
+    private static readonly string FileChecksum = Convert.ToHexString(SHA256.HashData([1, 2, 3, 4, 5, 6, 7, 8])).ToLowerInvariant();
 
     public DownloadServiceTests()
     {
@@ -31,18 +30,12 @@ public class DownloadServiceTests : IDisposable
 
         _repoMock = new Mock<IFileManifestRepository>();
         _providerMock = new Mock<IStorageProvider>();
-        _checksumMock = new Mock<IChecksumService>();
 
         _providerMock.SetupGet(p => p.ProviderType).Returns(StorageProviderType.FileSystem);
-
-        _checksumMock
-            .Setup(c => c.ComputeSha256Async(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(FileChecksum);
 
         _sut = new DownloadService(
             [_providerMock.Object],
             _repoMock.Object,
-            _checksumMock.Object,
             NullLogger<DownloadService>.Instance);
     }
 
@@ -152,6 +145,8 @@ public class DownloadServiceTests : IDisposable
     public async Task DownloadAsync_FinalChecksumMismatch_DeletesPartialOutputFile()
     {
         var manifest = CreateManifest();
+        manifest.Sha256Checksum = "wrong-final-checksum";
+
         _repoMock.Setup(r => r.GetByIdAsync(manifest.Id, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(manifest);
         _providerMock
@@ -160,10 +155,6 @@ public class DownloadServiceTests : IDisposable
         _providerMock
             .Setup(p => p.ReadChunkAsync($"{manifest.Id}/1", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new MemoryStream(Chunk1));
-
-        _checksumMock
-            .Setup(c => c.ComputeSha256Async(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("wrong-final-checksum");
 
         var outputPath = Path.Combine(_tempDir, "partial_final_fail.bin");
 

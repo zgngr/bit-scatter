@@ -11,18 +11,15 @@ public class DownloadService : IDownloadService
 {
     private readonly IEnumerable<IStorageProvider> _storageProviders;
     private readonly IFileManifestRepository _manifestRepository;
-    private readonly IChecksumService _checksumService;
     private readonly ILogger<DownloadService> _logger;
 
     public DownloadService(
         IEnumerable<IStorageProvider> storageProviders,
         IFileManifestRepository manifestRepository,
-        IChecksumService checksumService,
         ILogger<DownloadService> logger)
     {
         _storageProviders = storageProviders;
         _manifestRepository = manifestRepository;
-        _checksumService = checksumService;
         _logger = logger;
     }
 
@@ -50,6 +47,7 @@ public class DownloadService : IDownloadService
             int totalChunks = orderedChunks.Count;
             int completedChunks = 0;
             var buf = new byte[81_920];
+            using var fileHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
             foreach (var chunkInfo in orderedChunks)
             {
@@ -62,15 +60,16 @@ public class DownloadService : IDownloadService
 
                 await using var chunkStream = await provider.ReadChunkAsync(chunkInfo.StorageKey, cancellationToken);
 
-                using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                using var chunkHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                 int read;
                 while ((read = await chunkStream.ReadAsync(buf, cancellationToken)) > 0)
                 {
-                    sha256.AppendData(buf, 0, read);
+                    chunkHash.AppendData(buf, 0, read);
+                    fileHash.AppendData(buf, 0, read);
                     await outputStream.WriteAsync(buf.AsMemory(0, read), cancellationToken);
                 }
 
-                var actualChecksum = Convert.ToHexString(sha256.GetCurrentHash()).ToLowerInvariant();
+                var actualChecksum = Convert.ToHexString(chunkHash.GetCurrentHash()).ToLowerInvariant();
                 if (!string.Equals(actualChecksum, chunkInfo.Sha256Checksum, StringComparison.OrdinalIgnoreCase))
                 {
                     throw new ChecksumMismatchException(
@@ -83,9 +82,8 @@ public class DownloadService : IDownloadService
             }
 
             await outputStream.FlushAsync(cancellationToken);
-            outputStream.Seek(0, SeekOrigin.Begin);
 
-            var finalChecksum = await _checksumService.ComputeSha256Async(outputStream, cancellationToken);
+            var finalChecksum = Convert.ToHexString(fileHash.GetCurrentHash()).ToLowerInvariant();
             if (!string.Equals(finalChecksum, manifest.Sha256Checksum, StringComparison.OrdinalIgnoreCase))
             {
                 throw new ChecksumMismatchException(
