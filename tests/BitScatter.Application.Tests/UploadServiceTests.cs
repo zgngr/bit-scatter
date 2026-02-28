@@ -44,6 +44,10 @@ public class UploadServiceTests : IDisposable
             .Setup(p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Stream s, string key, CancellationToken ct) => key);
 
+        _repoMock
+            .Setup(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         _chunkingFactory = new FixedSizeChunkingStrategyFactory(
             NullLogger<FixedSizeChunkingStrategy>.Instance);
 
@@ -86,7 +90,10 @@ public class UploadServiceTests : IDisposable
 
         await _sut.UploadAsync(_testFile, options);
 
+        // Phase 1: pending manifest saved
         _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Phase 2: manifest completed with chunks
+        _repoMock.Verify(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -352,31 +359,78 @@ public class UploadServiceTests : IDisposable
         var act = () => sut.UploadAsync(_testFile, options);
         await act.Should().ThrowAsync<IOException>();
 
-        // Assert: first chunk was rolled back; manifest was never saved
+        // Assert: pending manifest was saved, first storage chunk rolled back, pending manifest cleaned up
+        _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Once);
         providerMock.Verify(
             p => p.DeleteChunkAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once);
-        _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _repoMock.Verify(r => r.DeleteAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once);
+        _repoMock.Verify(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task UploadAsync_ManifestSaveFails_RollsBackAllChunks()
+    public async Task UploadAsync_SavePendingManifestFails_ThrowsImmediatelyWithoutChunks()
     {
-        // Arrange: all chunks save OK, but manifest save throws
+        // SaveAsync (pending phase) throws before any chunks are uploaded
         _repoMock
             .Setup(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("DB unavailable"));
 
         var options = new UploadOptions { ChunkSizeBytes = 1024, StorageProviders = [StorageProviderType.FileSystem] };
 
-        // Act
         var act = () => _sut.UploadAsync(_testFile, options);
         await act.Should().ThrowAsync<InvalidOperationException>();
 
-        // Assert: both chunks were deleted (rolled back)
+        // No chunks were ever written to storage, so nothing to roll back
+        _providerMock.Verify(
+            p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _providerMock.Verify(
+            p => p.DeleteChunkAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UploadAsync_CompleteManifestFails_RollsBackAllChunksAndDeletesPendingManifest()
+    {
+        // All chunks save to storage OK, but CompleteAsync (phase 2) throws
+        _repoMock
+            .Setup(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("DB unavailable on complete"));
+
+        var options = new UploadOptions { ChunkSizeBytes = 1024, StorageProviders = [StorageProviderType.FileSystem] };
+
+        var act = () => _sut.UploadAsync(_testFile, options);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        // Both storage chunks rolled back
         _providerMock.Verify(
             p => p.DeleteChunkAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2));
+        // Pending manifest cleaned up from DB
+        _repoMock.Verify(r => r.DeleteAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UploadManyAsync_MaxConcurrentUploads_IsRespectedAsParallelismCap()
+    {
+        // Arrange: three files, cap = 1 (sequential)
+        var file2 = Path.Combine(_tempDir, "test_s2b.bin");
+        var file3 = Path.Combine(_tempDir, "test_s2c.bin");
+        File.WriteAllBytes(file2, new byte[512]);
+        File.WriteAllBytes(file3, new byte[512]);
+
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [StorageProviderType.FileSystem],
+            MaxConcurrentUploads = 1   // explicitly sequential
+        };
+
+        var result = await _sut.UploadManyAsync([_testFile, file2, file3], options);
+
+        result.AllSucceeded.Should().BeTrue();
+        result.TotalCount.Should().Be(3);
     }
 
     public void Dispose()

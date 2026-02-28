@@ -90,13 +90,77 @@ public class FileManifestRepositoryTests
     }
 
     [Fact]
-    public async Task GetAllAsync_ReturnsAllManifests()
+    public async Task GetAllAsync_ReturnsOnlyCompleteManifests()
     {
-        await _sut.SaveAsync(new FileManifest { FileName = "a.bin", Sha256Checksum = "a" });
-        await _sut.SaveAsync(new FileManifest { FileName = "b.bin", Sha256Checksum = "b" });
+        var complete = new FileManifest { FileName = "a.bin", Sha256Checksum = "a" };
+        var pending = new FileManifest { FileName = "b.bin", Sha256Checksum = "b" };
+
+        await _sut.SaveAsync(complete);
+        await _sut.SaveAsync(pending);
+        // Only complete is finalised; pending stays Pending
+        await _sut.CompleteAsync(complete.Id, []);
 
         var all = await _sut.GetAllAsync();
-        all.Should().HaveCount(2);
+        all.Should().HaveCount(1);
+        all[0].Id.Should().Be(complete.Id);
+    }
+
+    [Fact]
+    public async Task GetAllAsync_ExcludesPendingManifests()
+    {
+        var manifest = new FileManifest { FileName = "pending.bin", Sha256Checksum = "p" };
+        await _sut.SaveAsync(manifest);  // stays Pending
+
+        var all = await _sut.GetAllAsync();
+        all.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SetsStatusToCompleteAndPersistsChunks()
+    {
+        var manifest = new FileManifest { FileName = "complete.bin", Sha256Checksum = "c" };
+        await _sut.SaveAsync(manifest);
+
+        var chunks = new List<ChunkInfo>
+        {
+            new()
+            {
+                FileManifestId = manifest.Id,
+                ChunkIndex = 0,
+                Size = 512,
+                Sha256Checksum = "chk0",
+                StorageProviderType = StorageProviderType.FileSystem,
+                StorageKey = $"{manifest.Id}/0"
+            }
+        };
+
+        await _sut.CompleteAsync(manifest.Id, chunks);
+
+        var found = await _sut.GetByIdAsync(manifest.Id);
+        found.Should().NotBeNull();
+        found!.Status.Should().Be(ManifestStatus.Complete);
+        found.Chunks.Should().HaveCount(1);
+        found.Chunks[0].ChunkIndex.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ManifestNotFound_ThrowsKeyNotFoundException()
+    {
+        var act = () => _sut.CompleteAsync(Guid.NewGuid(), []);
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_WithNoChunks_SetsStatusToComplete()
+    {
+        var manifest = new FileManifest { FileName = "empty.bin", Sha256Checksum = "e" };
+        await _sut.SaveAsync(manifest);
+
+        await _sut.CompleteAsync(manifest.Id, []);
+
+        var found = await _sut.GetByIdAsync(manifest.Id);
+        found!.Status.Should().Be(ManifestStatus.Complete);
+        found.Chunks.Should().BeEmpty();
     }
 
     private sealed class TestDbContextFactory(DbContextOptions<BitScatterDbContext> options)

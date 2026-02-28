@@ -87,13 +87,35 @@ public static class ServiceCollectionExtensions
     {
         var metaFactory = serviceProvider.GetRequiredService<IDbContextFactory<BitScatterDbContext>>();
         await using var metaDb = await metaFactory.CreateDbContextAsync();
-        await metaDb.Database.EnsureCreatedAsync();
+
+        bool created = await metaDb.Database.EnsureCreatedAsync();
+        if (!created)
+        {
+            // Database already existed — apply incremental schema changes.
+            // SQLite does not support formal migrations in this project; we use
+            // "ADD COLUMN IF NOT EXISTS" semantics via a try/catch instead.
+            await ApplyMetadataSchemaUpdatesAsync(metaDb);
+        }
 
         var chunkFactory = serviceProvider.GetService<IDbContextFactory<ChunkStorageDbContext>>();
         if (chunkFactory is not null)
         {
             await using var chunkDb = await chunkFactory.CreateDbContextAsync();
             await chunkDb.Database.EnsureCreatedAsync();
+        }
+    }
+
+    // SQLite ALTER TABLE does not support IF NOT EXISTS, so we catch the error silently.
+    private static async Task ApplyMetadataSchemaUpdatesAsync(BitScatterDbContext context)
+    {
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"FileManifests\" ADD COLUMN \"Status\" INTEGER NOT NULL DEFAULT 0");
+        }
+        catch
+        {
+            // Column already present — no action required.
         }
     }
 }

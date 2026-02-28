@@ -95,6 +95,22 @@ public class DatabaseStorageProviderTests
         (await prep.ExistsAsync("retry-key")).Should().BeFalse();
     }
 
+    // P2 — ensure non-MemoryStream data (seekable) is saved correctly via the else-branch
+    [Fact]
+    public async Task SaveChunkAsync_SeekableNonMemoryStream_PersistsData()
+    {
+        var sut = CreateSut(CreateFactory(Guid.NewGuid().ToString()));
+        var bytes = new byte[] { 7, 8, 9, 10 };
+
+        await using var seekable = new SeekableWrapperStream(new MemoryStream(bytes));
+        await sut.SaveChunkAsync(seekable, "seekable-key");
+
+        await using var result = await sut.ReadChunkAsync("seekable-key");
+        var buf = new byte[4];
+        await result.ReadExactlyAsync(buf);
+        buf.Should().BeEquivalentTo(bytes);
+    }
+
     private sealed class InMemoryDbContextFactory(DbContextOptions<ChunkStorageDbContext> options)
         : IDbContextFactory<ChunkStorageDbContext>
     {
@@ -112,6 +128,27 @@ public class DatabaseStorageProviderTests
             if (_failuresRemaining-- > 0)
                 throw new InvalidOperationException("Simulated transient failure");
             return inner.CreateDbContext();
+        }
+    }
+
+    /// <summary>Wraps an inner stream but is NOT a MemoryStream, exercising
+    /// the non-MemoryStream branch of <c>SaveChunkAsync</c> (P2 fix).</summary>
+    private sealed class SeekableWrapperStream(Stream inner) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => inner.SetLength(value);
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
         }
     }
 }

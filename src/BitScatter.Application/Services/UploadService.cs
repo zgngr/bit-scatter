@@ -53,20 +53,24 @@ public class UploadService : IUploadService
 
         _logger.LogDebug("File checksum computed: {Checksum}", fileChecksum);
 
-        var manifest = new FileManifest
-        {
-            FileName = fileInfo.Name,
-            OriginalSize = fileInfo.Length,
-            Sha256Checksum = fileChecksum,
-            ChunkSize = options.ChunkSizeBytes
-        };
-
         var selectedProviders = GetSelectedProviders(options.StorageProviders);
         var chunkingStrategy = _chunkingStrategyFactory.Create(options.ChunkSizeBytes);
 
         var estimatedTotal = (int)Math.Max(1, Math.Ceiling((double)fileInfo.Length / options.ChunkSizeBytes));
 
+        // Phase 1: persist a Pending manifest so it can be tracked even if the upload fails.
+        var manifest = new FileManifest
+        {
+            FileName = fileInfo.Name,
+            OriginalSize = fileInfo.Length,
+            Sha256Checksum = fileChecksum,
+            ChunkSize = options.ChunkSizeBytes,
+            Status = ManifestStatus.Pending
+        };
+        await _manifestRepository.SaveAsync(manifest, cancellationToken);
+
         var savedChunks = new List<(IStorageProvider Provider, string Key)>();
+        var chunkInfos = new List<ChunkInfo>();
 
         try
         {
@@ -85,7 +89,7 @@ public class UploadService : IUploadService
                     await provider.SaveChunkAsync(chunk.Data, storageKey, cancellationToken);
                     savedChunks.Add((provider, storageKey));
 
-                    manifest.Chunks.Add(new ChunkInfo
+                    chunkInfos.Add(new ChunkInfo
                     {
                         FileManifestId = manifest.Id,
                         ChunkIndex = chunk.Index,
@@ -96,30 +100,32 @@ public class UploadService : IUploadService
                         StorageKey = storageKey
                     });
 
-                    progress?.Report((manifest.Chunks.Count, estimatedTotal));
+                    progress?.Report((chunkInfos.Count, estimatedTotal));
                 }
             }
 
-            await _manifestRepository.SaveAsync(manifest, cancellationToken);
+            // Phase 2: atomically record all chunks and flip status to Complete.
+            await _manifestRepository.CompleteAsync(manifest.Id, chunkInfos, cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Upload failed for file: {FilePath}. Rolling back {Count} saved chunk(s).",
                 filePath, savedChunks.Count);
             await RollbackChunksAsync(savedChunks);
+            await TryDeletePendingManifestAsync(manifest.Id);
             throw;
         }
 
         _logger.LogInformation(
             "Upload complete. File: {FileName}, Id: {ManifestId}, Chunks: {ChunkCount}",
-            manifest.FileName, manifest.Id, manifest.Chunks.Count);
+            manifest.FileName, manifest.Id, chunkInfos.Count);
 
         return new UploadResult
         {
             FileManifestId = manifest.Id,
             FileName = manifest.FileName,
             OriginalSize = manifest.OriginalSize,
-            ChunkCount = manifest.Chunks.Count,
+            ChunkCount = chunkInfos.Count,
             Success = true
         };
     }
@@ -134,7 +140,7 @@ public class UploadService : IUploadService
 
         await Parallel.ForEachAsync(filePaths, new ParallelOptions
         {
-            MaxDegreeOfParallelism = Environment.ProcessorCount,
+            MaxDegreeOfParallelism = options.MaxConcurrentUploads,
             CancellationToken = cancellationToken
         }, async (filePath, ct) =>
         {
@@ -181,6 +187,21 @@ public class UploadService : IUploadService
                     "Failed to roll back chunk {Key} from provider {Name}. The chunk may be orphaned.",
                     key, provider.Name);
             }
+        }
+    }
+
+    private async Task TryDeletePendingManifestAsync(Guid manifestId)
+    {
+        try
+        {
+            await _manifestRepository.DeleteAsync(manifestId);
+            _logger.LogDebug("Pending manifest {Id} removed after upload failure.", manifestId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to remove pending manifest {Id}. It will remain as Pending and may be reclaimed by a cleanup process.",
+                manifestId);
         }
     }
 

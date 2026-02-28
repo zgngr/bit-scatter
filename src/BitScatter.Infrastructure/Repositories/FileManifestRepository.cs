@@ -1,5 +1,6 @@
 using BitScatter.Application.Interfaces;
 using BitScatter.Domain.Entities;
+using BitScatter.Domain.Enums;
 using BitScatter.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,22 @@ public class FileManifestRepository : IFileManifestRepository
         _logger.LogInformation("File manifest saved: {Id} ({FileName})", manifest.Id, manifest.FileName);
     }
 
+    public async Task CompleteAsync(Guid id, IReadOnlyList<ChunkInfo> chunks, CancellationToken cancellationToken = default)
+    {
+        _logger.LogDebug("Completing file manifest: {Id}", id);
+        await using var context = await _factory.CreateDbContextAsync(cancellationToken);
+
+        var manifest = await context.FileManifests.FindAsync([id], cancellationToken);
+        if (manifest is null)
+            throw new KeyNotFoundException($"File manifest {id} not found during completion.");
+
+        manifest.Status = ManifestStatus.Complete;
+        await context.ChunkInfos.AddRangeAsync(chunks, cancellationToken);
+        await context.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("File manifest completed: {Id} ({FileName})", id, manifest.FileName);
+    }
+
     public async Task<FileManifest?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         _logger.LogDebug("Fetching file manifest by ID: {Id}", id);
@@ -49,6 +66,7 @@ public class FileManifestRepository : IFileManifestRepository
         await using var context = await _factory.CreateDbContextAsync(cancellationToken);
         return await context.FileManifests
             .Include(m => m.Chunks)
+            .Where(m => m.Status == ManifestStatus.Complete)
             .OrderByDescending(m => m.CreatedAt)
             .ToListAsync(cancellationToken);
     }

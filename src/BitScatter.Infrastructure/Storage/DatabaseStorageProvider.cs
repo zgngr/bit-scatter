@@ -33,9 +33,21 @@ public class DatabaseStorageProvider : IStorageProvider
     {
         _logger.LogDebug("Saving chunk to database with key: {Key}", key);
 
-        using var memStream = new MemoryStream();
-        await data.CopyToAsync(memStream, cancellationToken);
-        var bytes = memStream.ToArray();
+        // Avoid double allocation: if the stream is already a MemoryStream (the common case from
+        // FixedSizeChunkingStrategy), call ToArray() directly instead of copying into another buffer first.
+        // For other seekable streams, pre-size the MemoryStream to the known length to avoid growth copies.
+        byte[] bytes;
+        if (data is MemoryStream existingMs)
+        {
+            bytes = existingMs.ToArray();
+        }
+        else
+        {
+            var capacity = data.CanSeek ? (int)(data.Length - data.Position) : 0;
+            using var memStream = capacity > 0 ? new MemoryStream(capacity) : new MemoryStream();
+            await data.CopyToAsync(memStream, cancellationToken);
+            bytes = memStream.ToArray();
+        }
 
         await _retryPolicy.ExecuteAsync(async () =>
         {
