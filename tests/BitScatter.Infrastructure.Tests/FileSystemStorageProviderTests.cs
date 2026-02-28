@@ -82,6 +82,47 @@ public class FileSystemStorageProviderTests : IDisposable
         exists.Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData("../../etc/passwd")]
+    [InlineData("../sibling/secret")]
+    [InlineData("a/../../escape")]
+    public async Task SaveChunkAsync_TraversalKey_Throws(string key)
+    {
+        using var stream = new MemoryStream([1, 2, 3]);
+        var act = () => _sut.SaveChunkAsync(stream, key);
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData("../../etc/passwd")]
+    [InlineData("../sibling/secret")]
+    [InlineData("a/../../escape")]
+    public async Task ReadChunkAsync_TraversalKey_Throws(string key)
+    {
+        var act = () => _sut.ReadChunkAsync(key);
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData("../../etc/passwd")]
+    [InlineData("../sibling/secret")]
+    [InlineData("a/../../escape")]
+    public async Task DeleteChunkAsync_TraversalKey_Throws(string key)
+    {
+        var act = () => _sut.DeleteChunkAsync(key);
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData("../../etc/passwd")]
+    [InlineData("../sibling/secret")]
+    [InlineData("a/../../escape")]
+    public async Task ExistsAsync_TraversalKey_Throws(string key)
+    {
+        var act = () => _sut.ExistsAsync(key);
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDir))

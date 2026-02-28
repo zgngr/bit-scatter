@@ -19,8 +19,12 @@ public class FileSystemStorageProvider : IStorageProvider
     public FileSystemStorageProvider(string name, string basePath, ILogger<FileSystemStorageProvider> logger)
     {
         Name = name;
-        _basePath = basePath;
         _logger = logger;
+        // Resolve to a canonical absolute path and ensure it ends with a separator so
+        // that StartsWith checks cannot be fooled by sibling directories that share a prefix
+        // (e.g. /tmp/chunks vs /tmp/chunks-evil).
+        _basePath = Path.GetFullPath(basePath).TrimEnd(Path.DirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
         _retryPolicy = Policy
             .Handle<IOException>()
             .WaitAndRetryAsync(3, attempt => TimeSpan.FromMilliseconds(200 * attempt),
@@ -80,6 +84,11 @@ public class FileSystemStorageProvider : IStorageProvider
     private string GetFilePath(string key)
     {
         var sanitized = key.Replace('/', Path.DirectorySeparatorChar);
-        return Path.Combine(_basePath, sanitized);
+        var fullPath = Path.GetFullPath(Path.Combine(_basePath, sanitized));
+
+        if (!fullPath.StartsWith(_basePath, StringComparison.Ordinal))
+            throw new ArgumentException($"Storage key '{key}' resolves outside the storage base path.", nameof(key));
+
+        return fullPath;
     }
 }
