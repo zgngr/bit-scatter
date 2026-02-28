@@ -282,7 +282,7 @@ public class UploadServiceTests : IDisposable
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        var act = () => _sut.UploadManyAsync([_testFile, _testFile], options, cts.Token);
+        var act = () => _sut.UploadManyAsync([_testFile, _testFile], options, cancellationToken: cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Never);

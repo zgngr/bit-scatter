@@ -31,6 +31,7 @@ public class UploadService : IUploadService
     public async Task<UploadResult> UploadAsync(
         string filePath,
         UploadOptions options,
+        IProgress<(int completed, int total)>? progress = null,
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(filePath))
@@ -61,6 +62,8 @@ public class UploadService : IUploadService
             options.ChunkSizeBytes,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Strategies.FixedSizeChunkingStrategy>.Instance);
 
+        var estimatedTotal = (int)Math.Max(1, Math.Ceiling((double)fileInfo.Length / options.ChunkSizeBytes));
+
         await using var fileStream = File.OpenRead(filePath);
 
         await foreach (var chunk in chunkingStrategy.ChunkAsync(fileStream, cancellationToken))
@@ -85,6 +88,8 @@ public class UploadService : IUploadService
                     ProviderName = provider.Name,
                     StorageKey = storageKey
                 });
+
+                progress?.Report((manifest.Chunks.Count, estimatedTotal));
             }
         }
 
@@ -107,6 +112,7 @@ public class UploadService : IUploadService
     public async Task<BatchUploadResult> UploadManyAsync(
         IEnumerable<string> filePaths,
         UploadOptions options,
+        Func<string, IProgress<(int completed, int total)>?>? progressFactory = null,
         CancellationToken cancellationToken = default)
     {
         var results = new List<UploadResult>();
@@ -117,7 +123,7 @@ public class UploadService : IUploadService
 
             try
             {
-                results.Add(await UploadAsync(filePath, options, cancellationToken));
+                results.Add(await UploadAsync(filePath, options, progressFactory?.Invoke(filePath), cancellationToken));
             }
             catch (Exception ex)
             {

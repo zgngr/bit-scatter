@@ -36,11 +36,18 @@ public class DownloadCommand : AsyncCommand<DownloadCommandSettings>
                 .StartAsync(async ctx =>
                 {
                     var task = ctx.AddTask("[green]Downloading...[/]");
-                    task.IsIndeterminate = true;
 
-                    var r = await _downloadService.DownloadAsync(fileId, settings.OutputPath);
+                    var r = await _downloadService.DownloadAsync(
+                        fileId,
+                        settings.OutputPath,
+                        progress: new Progress<(int completed, int total)>(p =>
+                        {
+                            task.MaxValue = p.total;
+                            task.Value = p.completed;
+                        }),
+                        cancellationToken: cancellationToken);
 
-                    task.Value = 100;
+                    task.Value = task.MaxValue;
                     task.StopTask();
                     return r;
                 });
