@@ -148,7 +148,7 @@ make test
 make test-watch
 ```
 
-56 tests across three test projects (Domain, Application, Infrastructure), all passing.
+95 tests across three test projects (Domain, Application, Infrastructure), all passing.
 
 ## Running Benchmarks
 
@@ -176,3 +176,5 @@ Benchmarks measure chunking throughput across file sizes (1 MB, 10 MB) and chunk
 | `make run-upload-multi FILES="a b c"` | Upload multiple files in parallel |
 | `make run-upload-glob PATTERN="*.bin"` | Upload files matching a glob pattern |
 | `make run-download ID=<guid> OUTPUT=path` | Download a file by ID |
+| `make run-delete ID=<guid>` | Delete a file and all its chunks |
+| `make demo` | Run end-to-end upload → download → verify → delete pipeline |
