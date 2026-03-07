@@ -5,7 +5,7 @@ BitScatter is a .NET 10 console application that splits large files into chunks,
 ## Features
 
 - **Chunked file upload**: Files are split into fixed-size chunks (configurable, default 1024 KB)
-- **Parallel batch uploads**: Multiple files are uploaded concurrently using `Parallel.ForEachAsync` with processor-count parallelism
+- **Parallel batch uploads**: Multiple files are uploaded concurrently using `Parallel.ForEachAsync` (default max concurrency: 4 files)
 - **Glob pattern support**: Accepts file glob patterns (e.g., `*.bin`) for batch uploads
 - **Multi-provider distribution**: Chunks are round-robin distributed across configured storage providers
 - **SHA-256 integrity**: Both individual chunks and the full reconstructed file are verified
@@ -32,11 +32,12 @@ Dependencies flow inward: `Cli → Application ← Infrastructure`, with `Domain
 | `IStorageProvider` | Pluggable chunk storage (FileSystem, Database) |
 | `IChunkingStrategy` | Pluggable file splitting strategy (yields `IAsyncEnumerable<ChunkData>`) |
 | `IChunkingStrategyFactory` | Creates `IChunkingStrategy` instances via DI |
-| `IScatteringStrategy` | Selects which provider receives a given chunk |
+| `IPlacementStrategy` | Selects which provider receives a given chunk |
 | `IChecksumService` | Computes SHA-256 checksums on streams or files |
 | `IFileManifestRepository` | Metadata persistence for file manifests and chunk info |
 | `IUploadService` | Orchestrates chunking, scattering, and manifest persistence |
 | `IDownloadService` | Orchestrates chunk retrieval, integrity verification, and reassembly |
+| `IDeleteService` | Deletes file manifests and stored chunks |
 
 ### Storage Providers
 
@@ -50,16 +51,16 @@ Dependencies flow inward: `Cli → Application ← Infrastructure`, with `Domain
 | Database | Purpose | Default |
 |---|---|---|
 | SQLite (`BitScatterDbContext`) | File manifests and chunk metadata | `bitscatter.db` |
-| PostgreSQL (`ChunkStorageDbContext`) | Raw chunk binary data | Optional (Docker) |
+| PostgreSQL (`ChunkStorageDbContext`) | Raw chunk binary data | Enabled in default `appsettings.json` |
 
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- [Docker](https://www.docker.com/) (optional, for PostgreSQL chunk storage)
+- [Docker](https://www.docker.com/) (required for default configuration, which includes PostgreSQL chunk storage)
 
 ## Quick Start
 
-### 1. Start PostgreSQL (optional)
+### 1. Start PostgreSQL
 
 ```bash
 make docker-up
@@ -74,7 +75,7 @@ make build
 ### 3. Upload a file
 
 ```bash
-# Upload a single file (uses all configured filesystem providers by default)
+# Upload a single file (uses all configured providers by default)
 dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin
 
 # Upload with a custom chunk size (512 KB)
@@ -85,6 +86,9 @@ dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --providers 
 
 # Upload to database storage (requires PostgreSQL)
 dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --providers database
+
+# Upload with a max in-flight chunk limit
+dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --max-inflight-chunks 16
 
 # Upload multiple files in parallel
 dotnet run --project src/BitScatter.Cli -- upload file1.bin file2.bin file3.bin
@@ -105,6 +109,12 @@ dotnet run --project src/BitScatter.Cli -- list
 dotnet run --project src/BitScatter.Cli -- download <file-id> /path/to/output.bin
 ```
 
+### 6. Delete a file
+
+```bash
+dotnet run --project src/BitScatter.Cli -- delete <file-id>
+```
+
 ## Configuration
 
 Edit `src/BitScatter.Cli/appsettings.json`:
@@ -112,30 +122,56 @@ Edit `src/BitScatter.Cli/appsettings.json`:
 ```json
 {
   "BitScatter": {
-    "Metadata": "bitscatter.db",
     "FileSystemProviders": [
       { "Name": "node1", "Path": "/tmp/node1" },
       { "Name": "node2", "Path": "/tmp/node2" },
       { "Name": "node3", "Path": "/tmp/node3" },
       { "Name": "node4", "Path": "/tmp/node4" }
+    ],
+    "DatabaseProviders": [
+      {
+        "Name": "database",
+        "ConnectionString": "Host=localhost;Port=5432;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
+      }
     ]
   },
   "ConnectionStrings": {
+    "Metadata": "Data Source=bitscatter.db",
     "ChunkStorage": "Host=localhost;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
   },
   "Serilog": {
-    "MinimumLevel": { "Default": "Debug" },
+    "MinimumLevel": {
+      "Default": "Debug",
+      "Override": {
+        "Microsoft": "Warning",
+        "System": "Warning"
+      }
+    },
     "WriteTo": [
-      { "Name": "Console", "restrictedToMinimumLevel": "Fatal" },
-      { "Name": "File", "path": "logs/bitscatter-.log", "rollingInterval": "Day" }
+      {
+        "Name": "Console",
+        "Args": { "restrictedToMinimumLevel": "Fatal" }
+      },
+      {
+        "Name": "File",
+        "Args": {
+          "path": "logs/bitscatter-.log",
+          "rollingInterval": "Day",
+          "restrictedToMinimumLevel": "Information"
+        }
+      }
     ]
   }
 }
 ```
 
+`BitScatter:DatabaseProviders` is the preferred way to configure database chunk storage.  
+`ConnectionStrings:ChunkStorage` is still supported as a fallback when no database provider entry is present.
+
 Environment variable overrides use the `BITSCATTER_` prefix (double underscore for nesting):
 
 ```bash
+export BITSCATTER_ConnectionStrings__Metadata="Data Source=bitscatter.db"
 export BITSCATTER_ConnectionStrings__ChunkStorage="Host=localhost;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
 ```
 
@@ -147,8 +183,7 @@ make test
 # Watch mode (re-runs on file changes)
 make test-watch
 ```
-
-95 tests across three test projects (Domain, Application, Infrastructure), all passing.
+The test suite covers Domain, Application, and Infrastructure layers.
 
 ## Running Benchmarks
 
@@ -172,9 +207,7 @@ Benchmarks measure chunking throughput across file sizes (1 MB, 10 MB) and chunk
 | `make docker-down` | Stop PostgreSQL container |
 | `make docker-logs` | Tail PostgreSQL container logs |
 | `make run-list` | List all uploaded files |
-| `make run-upload FILE=path` | Upload a single file |
-| `make run-upload-multi FILES="a b c"` | Upload multiple files in parallel |
-| `make run-upload-glob PATTERN="*.bin"` | Upload files matching a glob pattern |
+| `make run-upload PATTERN=/path/to/file.bin` | Upload one file/path pattern |
 | `make run-download ID=<guid> OUTPUT=path` | Download a file by ID |
 | `make run-delete ID=<guid>` | Delete a file and all its chunks |
 | `make demo` | Run end-to-end upload → download → verify → delete pipeline |
