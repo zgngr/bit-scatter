@@ -56,7 +56,7 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_ValidFile_ReturnsSuccessResult()
+    public async Task UploadManyAsync_SingleValidFile_ReturnsSuccessResult()
     {
         var options = new UploadOptions
         {
@@ -64,7 +64,8 @@ public class UploadServiceTests : IDisposable
             StorageProviders = [StorageProviderType.FileSystem]
         };
 
-        var result = await _sut.UploadAsync(_testFile, options);
+        var batchResult = await _sut.UploadManyAsync([_testFile], options);
+        var result = batchResult.Results.Should().ContainSingle().Subject;
 
         result.Should().NotBeNull();
         result.Success.Should().BeTrue();
@@ -72,10 +73,13 @@ public class UploadServiceTests : IDisposable
         result.OriginalSize.Should().Be(2048);
         result.FileManifestId.Should().NotBe(Guid.Empty);
         result.ChunkCount.Should().Be(2);
+        batchResult.TotalCount.Should().Be(1);
+        batchResult.SuccessCount.Should().Be(1);
+        batchResult.FailureCount.Should().Be(0);
     }
 
     [Fact]
-    public async Task UploadAsync_SavesManifestToRepository()
+    public async Task UploadManyAsync_SingleValidFile_SavesManifestToRepository()
     {
         var options = new UploadOptions
         {
@@ -83,7 +87,7 @@ public class UploadServiceTests : IDisposable
             StorageProviders = [StorageProviderType.FileSystem]
         };
 
-        await _sut.UploadAsync(_testFile, options);
+        await _sut.UploadManyAsync([_testFile], options);
 
         // Phase 1: pending manifest saved
         _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -92,7 +96,7 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_SavesChunksToProvider()
+    public async Task UploadManyAsync_SingleValidFile_SavesChunksToProvider()
     {
         var options = new UploadOptions
         {
@@ -100,7 +104,7 @@ public class UploadServiceTests : IDisposable
             StorageProviders = [StorageProviderType.FileSystem]
         };
 
-        await _sut.UploadAsync(_testFile, options);
+        await _sut.UploadManyAsync([_testFile], options);
 
         _providerMock.Verify(
             p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
@@ -108,15 +112,20 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_FileNotFound_Throws()
+    public async Task UploadManyAsync_SingleMissingFile_ReturnsFailedResult()
     {
         var options = new UploadOptions { StorageProviders = [StorageProviderType.FileSystem] };
-        var act = () => _sut.UploadAsync("/nonexistent/file.bin", options);
-        await act.Should().ThrowAsync<FileNotFoundException>();
+        var result = await _sut.UploadManyAsync(["/nonexistent/file.bin"], options);
+
+        result.TotalCount.Should().Be(1);
+        result.SuccessCount.Should().Be(0);
+        result.FailureCount.Should().Be(1);
+        result.AllSucceeded.Should().BeFalse();
+        result.Results.Should().ContainSingle(r => !r.Success);
     }
 
     [Fact]
-    public async Task UploadAsync_NoMatchingProvider_Throws()
+    public async Task UploadManyAsync_SingleFileWithNoMatchingProvider_ReturnsFailedResult()
     {
         var options = new UploadOptions
         {
@@ -124,12 +133,17 @@ public class UploadServiceTests : IDisposable
             StorageProviders = [StorageProviderType.Database]  // No DB provider registered
         };
 
-        var act = () => _sut.UploadAsync(_testFile, options);
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        var result = await _sut.UploadManyAsync([_testFile], options);
+
+        result.TotalCount.Should().Be(1);
+        result.SuccessCount.Should().Be(0);
+        result.FailureCount.Should().Be(1);
+        result.AllSucceeded.Should().BeFalse();
+        result.Results.Should().ContainSingle(r => !r.Success);
     }
 
     [Fact]
-    public async Task UploadAsync_NullProviders_UsesAllAvailableProviders()
+    public async Task UploadManyAsync_SingleFileWithNullProviders_UsesAllAvailableProviders()
     {
         var dbProviderMock = new Mock<IStorageProvider>();
         dbProviderMock.SetupGet(p => p.Name).Returns("database");
@@ -151,7 +165,8 @@ public class UploadServiceTests : IDisposable
             StorageProviders = null // all available
         };
 
-        var result = await sut.UploadAsync(_testFile, options);
+        var batchResult = await sut.UploadManyAsync([_testFile], options);
+        var result = batchResult.Results.Should().ContainSingle().Subject;
 
         result.Success.Should().BeTrue();
         result.ChunkCount.Should().Be(2);
@@ -166,7 +181,7 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_MultipleProviders_ScattersChunksRoundRobin()
+    public async Task UploadManyAsync_SingleFileWithMultipleProviders_ScattersChunksRoundRobin()
     {
         var dbProviderMock = new Mock<IStorageProvider>();
         dbProviderMock.SetupGet(p => p.Name).Returns("database");
@@ -188,7 +203,8 @@ public class UploadServiceTests : IDisposable
             StorageProviders = [StorageProviderType.FileSystem, StorageProviderType.Database]
         };
 
-        var result = await sut.UploadAsync(_testFile, options);
+        var batchResult = await sut.UploadManyAsync([_testFile], options);
+        var result = batchResult.Results.Should().ContainSingle().Subject;
 
         result.Success.Should().BeTrue();
         result.ChunkCount.Should().Be(2);
@@ -202,7 +218,7 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_EmptyProviders_UsesAllAvailableProviders()
+    public async Task UploadManyAsync_SingleFileWithEmptyProviders_UsesAllAvailableProviders()
     {
         var options = new UploadOptions
         {
@@ -210,7 +226,8 @@ public class UploadServiceTests : IDisposable
             StorageProviders = [] // treated same as null
         };
 
-        var result = await _sut.UploadAsync(_testFile, options);
+        var batchResult = await _sut.UploadManyAsync([_testFile], options);
+        var result = batchResult.Results.Should().ContainSingle().Subject;
 
         result.Success.Should().BeTrue();
         result.ChunkCount.Should().Be(2);
@@ -327,7 +344,7 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_ProviderFailsMidUpload_RollsBackSavedChunks()
+    public async Task UploadManyAsync_SingleFileProviderFailsMidUpload_ReturnsFailureAndRollsBackSavedChunks()
     {
         // Arrange: 2-chunk file (2048 bytes / 1024 chunk size); second save throws
         var providerMock = new Mock<IStorageProvider>();
@@ -348,8 +365,10 @@ public class UploadServiceTests : IDisposable
         var options = new UploadOptions { ChunkSizeBytes = 1024, StorageProviders = [StorageProviderType.FileSystem] };
 
         // Act
-        var act = () => sut.UploadAsync(_testFile, options);
-        await act.Should().ThrowAsync<IOException>();
+        var result = await sut.UploadManyAsync([_testFile], options);
+        result.TotalCount.Should().Be(1);
+        result.SuccessCount.Should().Be(0);
+        result.FailureCount.Should().Be(1);
 
         // Assert: pending manifest was saved, first storage chunk rolled back, pending manifest cleaned up
         _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -361,7 +380,7 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_SavePendingManifestFails_ThrowsImmediatelyWithoutChunks()
+    public async Task UploadManyAsync_SingleFileSavePendingManifestFails_ReturnsFailureWithoutChunkWrites()
     {
         // SaveAsync (pending phase) throws before any chunks are uploaded
         _repoMock
@@ -370,8 +389,10 @@ public class UploadServiceTests : IDisposable
 
         var options = new UploadOptions { ChunkSizeBytes = 1024, StorageProviders = [StorageProviderType.FileSystem] };
 
-        var act = () => _sut.UploadAsync(_testFile, options);
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        var result = await _sut.UploadManyAsync([_testFile], options);
+        result.TotalCount.Should().Be(1);
+        result.SuccessCount.Should().Be(0);
+        result.FailureCount.Should().Be(1);
 
         // No chunks were ever written to storage, so nothing to roll back
         _providerMock.Verify(
@@ -383,7 +404,7 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_CompleteManifestFails_RollsBackAllChunksAndDeletesPendingManifest()
+    public async Task UploadManyAsync_SingleFileCompleteManifestFails_ReturnsFailureAndRollsBackAllChunks()
     {
         // All chunks save to storage OK, but CompleteAsync (phase 2) throws
         _repoMock
@@ -392,8 +413,10 @@ public class UploadServiceTests : IDisposable
 
         var options = new UploadOptions { ChunkSizeBytes = 1024, StorageProviders = [StorageProviderType.FileSystem] };
 
-        var act = () => _sut.UploadAsync(_testFile, options);
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        var result = await _sut.UploadManyAsync([_testFile], options);
+        result.TotalCount.Should().Be(1);
+        result.SuccessCount.Should().Be(0);
+        result.FailureCount.Should().Be(1);
 
         // Both storage chunks rolled back
         _providerMock.Verify(
@@ -426,7 +449,7 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_CompleteAsyncReceivesChecksumAndOrderedChunks()
+    public async Task UploadManyAsync_SingleFileCompleteAsyncReceivesChecksumAndOrderedChunks()
     {
         var options = new UploadOptions
         {
@@ -447,7 +470,7 @@ public class UploadServiceTests : IDisposable
             })
             .Returns(Task.CompletedTask);
 
-        await _sut.UploadAsync(_testFile, options);
+        await _sut.UploadManyAsync([_testFile], options);
 
         var expectedChecksum = Convert.ToHexString(SHA256.HashData(_testFileContent)).ToLowerInvariant();
         actualChecksum.Should().Be(expectedChecksum);
@@ -456,7 +479,7 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_MaxInFlightChunks_RespectsConcurrencyCap()
+    public async Task UploadManyAsync_SingleFileMaxInFlightChunks_RespectsConcurrencyCap()
     {
         var active = 0;
         var maxObserved = 0;
@@ -487,7 +510,7 @@ public class UploadServiceTests : IDisposable
             MaxInFlightChunks = 2
         };
 
-        await _sut.UploadAsync(_testFile, options);
+        await _sut.UploadManyAsync([_testFile], options);
 
         maxObserved.Should().BeLessThanOrEqualTo(2);
     }

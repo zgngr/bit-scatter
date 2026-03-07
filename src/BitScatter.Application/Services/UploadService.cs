@@ -32,7 +32,7 @@ public class UploadService : IUploadService
         _logger = logger;
     }
 
-    public async Task<UploadResult> UploadAsync(
+    private async Task<UploadResult> UploadSingleCoreAsync(
         string filePath,
         UploadOptions options,
         IProgress<(int completed, int total)>? progress = null,
@@ -247,7 +247,7 @@ public class UploadService : IUploadService
         {
             try
             {
-                results.Add(await UploadAsync(filePath, options, progressFactory?.Invoke(filePath), ct));
+                results.Add(await UploadSingleCoreAsync(filePath, options, progressFactory?.Invoke(filePath), ct));
             }
             catch (OperationCanceledException)
             {
