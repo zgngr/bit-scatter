@@ -18,6 +18,9 @@ public class UploadCommandSettings : CommandSettings
 
     [CommandOption("-p|--providers")]
     public string Providers { get; set; } = "all";
+
+    [CommandOption("--max-inflight-chunks")]
+    public int MaxInFlightChunks { get; set; } = 8;
 }
 
 public class UploadCommand : AsyncCommand<UploadCommandSettings>
@@ -42,7 +45,8 @@ public class UploadCommand : AsyncCommand<UploadCommandSettings>
         var options = new UploadOptions
         {
             ChunkSizeBytes = settings.ChunkSizeKb * 1024,
-            StorageProviders = ParseProviders(settings.Providers)
+            StorageProviders = ParseProviders(settings.Providers),
+            MaxInFlightChunks = settings.MaxInFlightChunks
         };
 
         BatchUploadResult? batchResult = null;

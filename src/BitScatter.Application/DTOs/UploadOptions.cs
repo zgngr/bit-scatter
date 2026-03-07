@@ -35,4 +35,20 @@ public class UploadOptions
     /// Defaults to 4 — a conservative cap that limits memory and I/O pressure regardless of CPU count.
     /// </summary>
     public int MaxConcurrentUploads { get; set; } = 4;
+
+    private int _maxInFlightChunks = 8;
+
+    /// <summary>
+    /// Maximum number of chunk writes that may be in-flight concurrently for a single file upload.
+    /// </summary>
+    public int MaxInFlightChunks
+    {
+        get => _maxInFlightChunks;
+        set
+        {
+            if (value <= 0)
+                throw new ArgumentOutOfRangeException(nameof(value), "Max in-flight chunks must be positive.");
+            _maxInFlightChunks = value;
+        }
+    }
 }

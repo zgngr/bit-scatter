@@ -11,7 +11,7 @@ public interface IFileManifestRepository
     /// <see cref="Domain.Enums.ManifestStatus.Complete"/>.
     /// Called after all chunk bytes have been successfully written to their storage providers.
     /// </summary>
-    Task CompleteAsync(Guid id, IReadOnlyList<ChunkInfo> chunks, CancellationToken cancellationToken = default);
+    Task CompleteAsync(Guid id, string sha256Checksum, IReadOnlyList<ChunkInfo> chunks, CancellationToken cancellationToken = default);
 
     Task<FileManifest?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 

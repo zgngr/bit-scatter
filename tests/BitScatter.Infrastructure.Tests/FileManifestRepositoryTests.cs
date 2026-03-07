@@ -98,7 +98,7 @@ public class FileManifestRepositoryTests
         await _sut.SaveAsync(complete);
         await _sut.SaveAsync(pending);
         // Only complete is finalised; pending stays Pending
-        await _sut.CompleteAsync(complete.Id, []);
+        await _sut.CompleteAsync(complete.Id, "checksum-complete", []);
 
         var all = await _sut.GetAllAsync();
         all.Should().HaveCount(1);
@@ -134,11 +134,12 @@ public class FileManifestRepositoryTests
             }
         };
 
-        await _sut.CompleteAsync(manifest.Id, chunks);
+        await _sut.CompleteAsync(manifest.Id, "checksum-complete", chunks);
 
         var found = await _sut.GetByIdAsync(manifest.Id);
         found.Should().NotBeNull();
         found!.Status.Should().Be(ManifestStatus.Complete);
+        found.Sha256Checksum.Should().Be("checksum-complete");
         found.Chunks.Should().HaveCount(1);
         found.Chunks[0].ChunkIndex.Should().Be(0);
     }
@@ -146,7 +147,7 @@ public class FileManifestRepositoryTests
     [Fact]
     public async Task CompleteAsync_ManifestNotFound_ThrowsKeyNotFoundException()
     {
-        var act = () => _sut.CompleteAsync(Guid.NewGuid(), []);
+        var act = () => _sut.CompleteAsync(Guid.NewGuid(), "checksum", []);
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
@@ -156,7 +157,7 @@ public class FileManifestRepositoryTests
         var manifest = new FileManifest { FileName = "empty.bin", Sha256Checksum = "e" };
         await _sut.SaveAsync(manifest);
 
-        await _sut.CompleteAsync(manifest.Id, []);
+        await _sut.CompleteAsync(manifest.Id, "checksum-empty", []);
 
         var found = await _sut.GetByIdAsync(manifest.Id);
         found!.Status.Should().Be(ManifestStatus.Complete);

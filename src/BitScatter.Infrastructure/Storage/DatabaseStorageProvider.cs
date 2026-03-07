@@ -14,14 +14,19 @@ public class DatabaseStorageProvider : IStorageProvider
     private readonly IDbContextFactory<ChunkStorageDbContext> _factory;
     private readonly ILogger<DatabaseStorageProvider> _logger;
     private readonly AsyncRetryPolicy _retryPolicy;
+    private readonly string _name;
 
-    public string Name => "database";
+    public string Name => _name;
     public StorageProviderType ProviderType => StorageProviderType.Database;
 
-    public DatabaseStorageProvider(IDbContextFactory<ChunkStorageDbContext> factory, ILogger<DatabaseStorageProvider> logger)
+    public DatabaseStorageProvider(
+        IDbContextFactory<ChunkStorageDbContext> factory,
+        ILogger<DatabaseStorageProvider> logger,
+        string? name = null)
     {
         _factory = factory;
         _logger = logger;
+        _name = string.IsNullOrWhiteSpace(name) ? "database" : name;
         _retryPolicy = Policy
             .Handle<Exception>(ex => ex is not OperationCanceledException)
             .WaitAndRetryAsync(3, attempt => TimeSpan.FromMilliseconds(200 * attempt),

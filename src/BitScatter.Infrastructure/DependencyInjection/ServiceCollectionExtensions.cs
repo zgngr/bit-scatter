@@ -21,12 +21,23 @@ public static class ServiceCollectionExtensions
         var metadataConnectionString = configuration.GetConnectionString("Metadata")
             ?? "Data Source=bitscatter.db";
 
-        var chunkConnectionString = configuration.GetConnectionString("ChunkStorage");
-
         services.AddDbContextFactory<BitScatterDbContext>(options =>
             options.UseSqlite(metadataConnectionString));
 
-        if (!string.IsNullOrEmpty(chunkConnectionString))
+        var dbProvider = configuration
+            .GetSection("BitScatter:DatabaseProviders")
+            .GetChildren()
+            .Select(s => new DatabaseProviderOptions
+            {
+                Name = s["Name"] ?? string.Empty,
+                ConnectionString = s["ConnectionString"] ?? string.Empty
+            })
+            .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.ConnectionString));
+
+        var chunkConnectionString = dbProvider?.ConnectionString
+            ?? configuration.GetConnectionString("ChunkStorage");
+
+        if (!string.IsNullOrWhiteSpace(chunkConnectionString))
         {
             services.AddDbContextFactory<ChunkStorageDbContext>(options =>
                 options.UseNpgsql(chunkConnectionString));
@@ -34,7 +45,8 @@ public static class ServiceCollectionExtensions
             services.AddScoped<IStorageProvider>(sp =>
                 new DatabaseStorageProvider(
                     sp.GetRequiredService<IDbContextFactory<ChunkStorageDbContext>>(),
-                    sp.GetRequiredService<ILogger<DatabaseStorageProvider>>()));
+                    sp.GetRequiredService<ILogger<DatabaseStorageProvider>>(),
+                    dbProvider?.Name));
         }
 
         var fsProviders = configuration

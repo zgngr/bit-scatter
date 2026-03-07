@@ -27,7 +27,7 @@ public class FileManifestRepository : IFileManifestRepository
         _logger.LogInformation("File manifest saved: {Id} ({FileName})", manifest.Id, manifest.FileName);
     }
 
-    public async Task CompleteAsync(Guid id, IReadOnlyList<ChunkInfo> chunks, CancellationToken cancellationToken = default)
+    public async Task CompleteAsync(Guid id, string sha256Checksum, IReadOnlyList<ChunkInfo> chunks, CancellationToken cancellationToken = default)
     {
         _logger.LogDebug("Completing file manifest: {Id}", id);
         await using var context = await _factory.CreateDbContextAsync(cancellationToken);
@@ -36,6 +36,7 @@ public class FileManifestRepository : IFileManifestRepository
         if (manifest is null)
             throw new KeyNotFoundException($"File manifest {id} not found during completion.");
 
+        manifest.Sha256Checksum = sha256Checksum;
         manifest.Status = ManifestStatus.Complete;
         await context.ChunkInfos.AddRangeAsync(chunks, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);

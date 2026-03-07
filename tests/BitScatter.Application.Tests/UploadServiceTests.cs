@@ -7,6 +7,7 @@ using BitScatter.Domain.Enums;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.Security.Cryptography;
 
 namespace BitScatter.Application.Tests;
 
@@ -14,9 +15,9 @@ public class UploadServiceTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly string _testFile;
+    private readonly byte[] _testFileContent;
     private readonly Mock<IFileManifestRepository> _repoMock;
     private readonly Mock<IStorageProvider> _providerMock;
-    private readonly Mock<IChecksumService> _checksumMock;
     private readonly IChunkingStrategyFactory _chunkingFactory;
     private readonly UploadService _sut;
 
@@ -26,16 +27,11 @@ public class UploadServiceTests : IDisposable
         Directory.CreateDirectory(_tempDir);
         _testFile = Path.Combine(_tempDir, "test.bin");
 
-        var content = new byte[2048];
-        Random.Shared.NextBytes(content);
-        File.WriteAllBytes(_testFile, content);
+        _testFileContent = new byte[2048];
+        Random.Shared.NextBytes(_testFileContent);
+        File.WriteAllBytes(_testFile, _testFileContent);
 
         _repoMock = new Mock<IFileManifestRepository>();
-        _checksumMock = new Mock<IChecksumService>();
-
-        _checksumMock
-            .Setup(c => c.ComputeSha256Async(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("filechecksum");
 
         _providerMock = new Mock<IStorageProvider>();
         _providerMock.SetupGet(p => p.Name).Returns("node1");
@@ -45,7 +41,7 @@ public class UploadServiceTests : IDisposable
             .ReturnsAsync((Stream s, string key, CancellationToken ct) => key);
 
         _repoMock
-            .Setup(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _chunkingFactory = new FixedSizeChunkingStrategyFactory(
@@ -54,7 +50,6 @@ public class UploadServiceTests : IDisposable
         _sut = new UploadService(
             [_providerMock.Object],
             _repoMock.Object,
-            _checksumMock.Object,
             new RoundRobinScatteringStrategy(),
             _chunkingFactory,
             NullLogger<UploadService>.Instance);
@@ -93,7 +88,7 @@ public class UploadServiceTests : IDisposable
         // Phase 1: pending manifest saved
         _repoMock.Verify(r => r.SaveAsync(It.IsAny<FileManifest>(), It.IsAny<CancellationToken>()), Times.Once);
         // Phase 2: manifest completed with chunks
-        _repoMock.Verify(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+        _repoMock.Verify(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -146,7 +141,6 @@ public class UploadServiceTests : IDisposable
         var sut = new UploadService(
             [_providerMock.Object, dbProviderMock.Object],
             _repoMock.Object,
-            _checksumMock.Object,
             new RoundRobinScatteringStrategy(),
             _chunkingFactory,
             NullLogger<UploadService>.Instance);
@@ -184,7 +178,6 @@ public class UploadServiceTests : IDisposable
         var sut = new UploadService(
             [_providerMock.Object, dbProviderMock.Object],
             _repoMock.Object,
-            _checksumMock.Object,
             new RoundRobinScatteringStrategy(),
             _chunkingFactory,
             NullLogger<UploadService>.Instance);
@@ -348,7 +341,6 @@ public class UploadServiceTests : IDisposable
         var sut = new UploadService(
             [providerMock.Object],
             _repoMock.Object,
-            _checksumMock.Object,
             new RoundRobinScatteringStrategy(),
             _chunkingFactory,
             NullLogger<UploadService>.Instance);
@@ -365,7 +357,7 @@ public class UploadServiceTests : IDisposable
             p => p.DeleteChunkAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _repoMock.Verify(r => r.DeleteAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once);
-        _repoMock.Verify(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _repoMock.Verify(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -395,7 +387,7 @@ public class UploadServiceTests : IDisposable
     {
         // All chunks save to storage OK, but CompleteAsync (phase 2) throws
         _repoMock
-            .Setup(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("DB unavailable on complete"));
 
         var options = new UploadOptions { ChunkSizeBytes = 1024, StorageProviders = [StorageProviderType.FileSystem] };
@@ -431,6 +423,73 @@ public class UploadServiceTests : IDisposable
 
         result.AllSucceeded.Should().BeTrue();
         result.TotalCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task UploadAsync_CompleteAsyncReceivesChecksumAndOrderedChunks()
+    {
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 256,
+            StorageProviders = [StorageProviderType.FileSystem],
+            MaxInFlightChunks = 4
+        };
+
+        string? actualChecksum = null;
+        IReadOnlyList<ChunkInfo>? actualChunks = null;
+
+        _repoMock
+            .Setup(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, IReadOnlyList<ChunkInfo>, CancellationToken>((_, checksum, chunks, _) =>
+            {
+                actualChecksum = checksum;
+                actualChunks = chunks;
+            })
+            .Returns(Task.CompletedTask);
+
+        await _sut.UploadAsync(_testFile, options);
+
+        var expectedChecksum = Convert.ToHexString(SHA256.HashData(_testFileContent)).ToLowerInvariant();
+        actualChecksum.Should().Be(expectedChecksum);
+        actualChunks.Should().NotBeNull();
+        actualChunks!.Select(c => c.ChunkIndex).Should().BeInAscendingOrder();
+    }
+
+    [Fact]
+    public async Task UploadAsync_MaxInFlightChunks_RespectsConcurrencyCap()
+    {
+        var active = 0;
+        var maxObserved = 0;
+
+        _providerMock
+            .Setup(p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Stream _, string key, CancellationToken _) =>
+            {
+                var current = Interlocked.Increment(ref active);
+                while (true)
+                {
+                    var snapshot = Volatile.Read(ref maxObserved);
+                    if (current <= snapshot)
+                        break;
+                    if (Interlocked.CompareExchange(ref maxObserved, current, snapshot) == snapshot)
+                        break;
+                }
+
+                await Task.Delay(30);
+                Interlocked.Decrement(ref active);
+                return key;
+            });
+
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 128,
+            StorageProviders = [StorageProviderType.FileSystem],
+            MaxInFlightChunks = 2
+        };
+
+        await _sut.UploadAsync(_testFile, options);
+
+        maxObserved.Should().BeLessThanOrEqualTo(2);
     }
 
     public void Dispose()
