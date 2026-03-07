@@ -85,7 +85,6 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddScoped<IFileManifestRepository, FileManifestRepository>();
-        services.AddScoped<IChecksumService, ChecksumService>();
         services.AddSingleton<IPlacementStrategy, RoundRobinPlacementStrategy>();
         services.AddSingleton<IChunkingStrategyFactory, FixedSizeChunkingStrategyFactory>();
         services.AddScoped<IUploadService, UploadService>();

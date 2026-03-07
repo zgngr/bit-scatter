@@ -33,7 +33,6 @@ Dependencies flow inward: `Cli → Application ← Infrastructure`, with `Domain
 | `IChunkingStrategy` | Pluggable file splitting strategy (yields `IAsyncEnumerable<ChunkData>`) |
 | `IChunkingStrategyFactory` | Creates `IChunkingStrategy` instances via DI |
 | `IPlacementStrategy` | Selects which provider receives a given chunk |
-| `IChecksumService` | Computes SHA-256 checksums on streams or files |
 | `IFileManifestRepository` | Metadata persistence for file manifests and chunk info |
 | `IUploadService` | Orchestrates chunking, scattering, and manifest persistence |
 | `IDownloadService` | Orchestrates chunk retrieval, integrity verification, and reassembly |
@@ -122,6 +121,7 @@ Edit `src/BitScatter.Cli/appsettings.json`:
 ```json
 {
   "BitScatter": {
+    "Metadata": "bitscatter.db",
     "FileSystemProviders": [
       { "Name": "node1", "Path": "/tmp/node1" },
       { "Name": "node2", "Path": "/tmp/node2" },
@@ -134,10 +134,6 @@ Edit `src/BitScatter.Cli/appsettings.json`:
         "ConnectionString": "Host=localhost;Port=5432;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
       }
     ]
-  },
-  "ConnectionStrings": {
-    "Metadata": "Data Source=bitscatter.db",
-    "ChunkStorage": "Host=localhost;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
   },
   "Serilog": {
     "MinimumLevel": {
