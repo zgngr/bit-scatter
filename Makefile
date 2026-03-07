@@ -19,12 +19,6 @@ clean:
 	dotnet clean $(SOLUTION)
 
 run-upload:
-	dotnet run --project $(CLI_PROJECT) -- upload $(FILE)
-
-run-upload-multi:
-	dotnet run --project $(CLI_PROJECT) -- upload $(FILES)
-
-run-upload-glob:
 	dotnet run --project $(CLI_PROJECT) -- upload $(PATTERN)
 
 run-download:
