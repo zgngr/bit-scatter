@@ -50,7 +50,7 @@ public class UploadServiceTests : IDisposable
         _sut = new UploadService(
             [_providerMock.Object],
             _repoMock.Object,
-            new RoundRobinScatteringStrategy(),
+            new RoundRobinPlacementStrategy(),
             _chunkingFactory,
             NullLogger<UploadService>.Instance);
     }
@@ -155,7 +155,7 @@ public class UploadServiceTests : IDisposable
         var sut = new UploadService(
             [_providerMock.Object, dbProviderMock.Object],
             _repoMock.Object,
-            new RoundRobinScatteringStrategy(),
+            new RoundRobinPlacementStrategy(),
             _chunkingFactory,
             NullLogger<UploadService>.Instance);
 
@@ -193,7 +193,7 @@ public class UploadServiceTests : IDisposable
         var sut = new UploadService(
             [_providerMock.Object, dbProviderMock.Object],
             _repoMock.Object,
-            new RoundRobinScatteringStrategy(),
+            new RoundRobinPlacementStrategy(),
             _chunkingFactory,
             NullLogger<UploadService>.Instance);
 
@@ -358,7 +358,7 @@ public class UploadServiceTests : IDisposable
         var sut = new UploadService(
             [providerMock.Object],
             _repoMock.Object,
-            new RoundRobinScatteringStrategy(),
+            new RoundRobinPlacementStrategy(),
             _chunkingFactory,
             NullLogger<UploadService>.Instance);
 

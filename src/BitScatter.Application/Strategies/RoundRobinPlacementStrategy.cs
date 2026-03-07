@@ -2,7 +2,7 @@ using BitScatter.Application.Interfaces;
 
 namespace BitScatter.Application.Strategies;
 
-public class RoundRobinScatteringStrategy : IScatteringStrategy
+public class RoundRobinPlacementStrategy : IPlacementStrategy
 {
     public IStorageProvider SelectProvider(int chunkIndex, IReadOnlyList<IStorageProvider> providers)
     {

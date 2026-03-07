@@ -1,6 +1,6 @@
 namespace BitScatter.Application.Interfaces;
 
-public interface IScatteringStrategy
+public interface IPlacementStrategy
 {
     IStorageProvider SelectProvider(int chunkIndex, IReadOnlyList<IStorageProvider> providers);
 }

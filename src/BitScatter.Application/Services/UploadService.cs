@@ -14,20 +14,20 @@ public class UploadService : IUploadService
 {
     private readonly IEnumerable<IStorageProvider> _storageProviders;
     private readonly IFileManifestRepository _manifestRepository;
-    private readonly IScatteringStrategy _scatteringStrategy;
+    private readonly IPlacementStrategy _placementStrategy;
     private readonly IChunkingStrategyFactory _chunkingStrategyFactory;
     private readonly ILogger<UploadService> _logger;
 
     public UploadService(
         IEnumerable<IStorageProvider> storageProviders,
         IFileManifestRepository manifestRepository,
-        IScatteringStrategy scatteringStrategy,
+        IPlacementStrategy placementStrategy,
         IChunkingStrategyFactory chunkingStrategyFactory,
         ILogger<UploadService> logger)
     {
         _storageProviders = storageProviders;
         _manifestRepository = manifestRepository;
-        _scatteringStrategy = scatteringStrategy;
+        _placementStrategy = placementStrategy;
         _chunkingStrategyFactory = chunkingStrategyFactory;
         _logger = logger;
     }
@@ -99,7 +99,7 @@ public class UploadService : IUploadService
                     {
                         hasher.AppendData(ReadChunkBytes(chunk));
 
-                        var provider = _scatteringStrategy.SelectProvider(chunk.Index, selectedProviders);
+                        var provider = _placementStrategy.SelectProvider(chunk.Index, selectedProviders);
                         var storageKey = $"{manifest.Id}/{chunk.Index}";
 
                         _logger.LogDebug(

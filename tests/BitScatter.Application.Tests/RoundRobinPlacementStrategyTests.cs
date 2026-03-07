@@ -6,7 +6,7 @@ using Moq;
 
 namespace BitScatter.Application.Tests;
 
-public class RoundRobinScatteringStrategyTests
+public class RoundRobinPlacementStrategyTests
 {
     private static IStorageProvider MakeProvider(StorageProviderType type)
     {
@@ -15,7 +15,7 @@ public class RoundRobinScatteringStrategyTests
         return mock.Object;
     }
 
-    private readonly RoundRobinScatteringStrategy _sut = new();
+    private readonly RoundRobinPlacementStrategy _sut = new();
 
     [Fact]
     public void SelectProvider_SingleProvider_AlwaysReturnsSameProvider()
