@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\BitScatter.Application\BitScatter.Application.csproj" />
+    <ProjectReference Include="..\..\src\BitScatter.Cli\BitScatter.Cli.csproj" />
   </ItemGroup>
 
 </Project>

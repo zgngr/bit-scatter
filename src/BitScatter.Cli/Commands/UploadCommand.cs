@@ -160,6 +160,7 @@ public class UploadCommand : AsyncCommand<UploadCommandSettings>
             {
                 "filesystem" or "fs" => StorageProviderType.FileSystem,
                 "database" or "db" => StorageProviderType.Database,
+                "s3" => StorageProviderType.S3,
                 _ => throw new ArgumentException($"Unknown provider: {p}")
             })
             .ToArray();

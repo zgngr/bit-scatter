@@ -1,3 +1,6 @@
+using Amazon;
+using Amazon.Runtime;
+using Amazon.S3;
 using BitScatter.Application.Interfaces;
 using BitScatter.Application.Services;
 using BitScatter.Application.Strategies;
@@ -47,6 +50,39 @@ public static class ServiceCollectionExtensions
                     sp.GetRequiredService<IDbContextFactory<ChunkStorageDbContext>>(),
                     sp.GetRequiredService<ILogger<DatabaseStorageProvider>>(),
                     dbProvider?.Name));
+        }
+
+        var s3Section = configuration.GetSection("BitScatter:S3");
+        if (s3Section.Exists())
+        {
+            var s3Options = BuildS3Options(s3Section);
+            ValidateS3Options(s3Options);
+
+            var s3Name = string.IsNullOrWhiteSpace(s3Options.Name) ? "s3" : s3Options.Name;
+            services.AddScoped<IStorageProvider>(sp =>
+            {
+                var credentials = new BasicAWSCredentials(s3Options.AccessKey, s3Options.SecretKey);
+                var s3Config = new AmazonS3Config
+                {
+                    RegionEndpoint = RegionEndpoint.GetBySystemName(s3Options.Region)
+                };
+
+                if (!string.IsNullOrWhiteSpace(s3Options.Endpoint))
+                {
+                    s3Config.ServiceURL = s3Options.Endpoint;
+                }
+
+                if (s3Options.ForcePathStyle.HasValue)
+                {
+                    s3Config.ForcePathStyle = s3Options.ForcePathStyle.Value;
+                }
+
+                return new S3StorageProvider(
+                    s3Name,
+                    s3Options.Bucket,
+                    new AmazonS3Client(credentials, s3Config),
+                    sp.GetRequiredService<ILogger<S3StorageProvider>>());
+            });
         }
 
         var fsProviders = configuration
@@ -128,5 +164,36 @@ public static class ServiceCollectionExtensions
         {
             // Column already present — no action required.
         }
+    }
+
+    private static S3ProviderOptions BuildS3Options(IConfigurationSection section)
+    {
+        bool? forcePathStyle = null;
+        if (bool.TryParse(section["ForcePathStyle"], out var parsedForcePathStyle))
+            forcePathStyle = parsedForcePathStyle;
+
+        return new S3ProviderOptions
+        {
+            Name = section["Name"] ?? "s3",
+            Bucket = section["Bucket"] ?? string.Empty,
+            Region = section["Region"] ?? string.Empty,
+            AccessKey = section["AccessKey"] ?? string.Empty,
+            SecretKey = section["SecretKey"] ?? string.Empty,
+            Endpoint = section["Endpoint"],
+            ForcePathStyle = forcePathStyle
+        };
+    }
+
+    private static void ValidateS3Options(S3ProviderOptions options)
+    {
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(options.Bucket)) missing.Add("Bucket");
+        if (string.IsNullOrWhiteSpace(options.Region)) missing.Add("Region");
+        if (string.IsNullOrWhiteSpace(options.AccessKey)) missing.Add("AccessKey");
+        if (string.IsNullOrWhiteSpace(options.SecretKey)) missing.Add("SecretKey");
+
+        if (missing.Count > 0)
+            throw new InvalidOperationException(
+                $"BitScatter:S3 is configured but missing required field(s): {string.Join(", ", missing)}");
     }
 }

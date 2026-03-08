@@ -218,6 +218,43 @@ public class UploadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UploadManyAsync_SingleFileWithFileSystemAndS3Providers_ScattersChunksRoundRobin()
+    {
+        var s3ProviderMock = new Mock<IStorageProvider>();
+        s3ProviderMock.SetupGet(p => p.Name).Returns("s3");
+        s3ProviderMock.SetupGet(p => p.ProviderType).Returns(StorageProviderType.S3);
+        s3ProviderMock
+            .Setup(p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Stream s, string key, CancellationToken ct) => key);
+
+        var sut = new UploadService(
+            [_providerMock.Object, s3ProviderMock.Object],
+            _repoMock.Object,
+            new RoundRobinPlacementStrategy(),
+            _chunkingFactory,
+            NullLogger<UploadService>.Instance);
+
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [StorageProviderType.FileSystem, StorageProviderType.S3]
+        };
+
+        var batchResult = await sut.UploadManyAsync([_testFile], options);
+        var result = batchResult.Results.Should().ContainSingle().Subject;
+
+        result.Success.Should().BeTrue();
+        result.ChunkCount.Should().Be(2);
+
+        _providerMock.Verify(
+            p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        s3ProviderMock.Verify(
+            p => p.SaveChunkAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task UploadManyAsync_SingleFileWithEmptyProviders_UsesAllAvailableProviders()
     {
         var options = new UploadOptions

@@ -33,7 +33,8 @@ app.Configure(config =>
     config.AddCommand<UploadCommand>("upload")
         .WithDescription("Upload a file by splitting it into chunks across storage providers")
         .WithExample("upload", "./largefile.bin")
-        .WithExample("upload", "./largefile.bin", "--chunk-size", "512", "--providers", "filesystem");
+        .WithExample("upload", "./largefile.bin", "--chunk-size", "512", "--providers", "filesystem")
+        .WithExample("upload", "./largefile.bin", "--providers", "s3");
 
     config.AddCommand<DownloadCommand>("download")
         .WithDescription("Download and reassemble a file from its chunks")

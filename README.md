@@ -1,6 +1,6 @@
 # BitScatter
 
-BitScatter is a .NET 10 console application that splits large files into chunks, distributes them across multiple storage providers (file system and/or PostgreSQL), and reassembles them with SHA-256 integrity verification.
+BitScatter is a .NET 10 console application that splits large files into chunks, distributes them across multiple storage providers (file system, PostgreSQL, and/or Amazon S3), and reassembles them with SHA-256 integrity verification.
 
 ## Features
 
@@ -29,7 +29,7 @@ Dependencies flow inward: `Cli → Application ← Infrastructure`, with `Domain
 
 | Interface | Description |
 |---|---|
-| `IStorageProvider` | Pluggable chunk storage (FileSystem, Database) |
+| `IStorageProvider` | Pluggable chunk storage (FileSystem, Database, S3) |
 | `IChunkingStrategy` | Pluggable file splitting strategy (yields `IAsyncEnumerable<ChunkData>`) |
 | `IChunkingStrategyFactory` | Creates `IChunkingStrategy` instances via DI |
 | `IPlacementStrategy` | Selects which provider receives a given chunk |
@@ -44,6 +44,7 @@ Dependencies flow inward: `Cli → Application ← Infrastructure`, with `Domain
 |---|---|---|
 | `FileSystemStorageProvider` | Local filesystem (configurable paths) | 3 retries on `IOException`, exponential backoff (200/400/600 ms) |
 | `DatabaseStorageProvider` | PostgreSQL via EF Core | 3 retries on transient exceptions, exponential backoff |
+| `S3StorageProvider` | Amazon S3 or S3-compatible APIs | 3 retries on transient exceptions, exponential backoff |
 
 ### Databases
 
@@ -85,6 +86,9 @@ dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --providers 
 
 # Upload to database storage (requires PostgreSQL)
 dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --providers database
+
+# Upload to Amazon S3 storage
+dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --providers s3
 
 # Upload with a max in-flight chunk limit
 dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --max-inflight-chunks 16
@@ -133,7 +137,16 @@ Edit `src/BitScatter.Cli/appsettings.json`:
         "Name": "database",
         "ConnectionString": "Host=localhost;Port=5432;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
       }
-    ]
+    ],
+    "S3": {
+      "Name": "s3",
+      "Bucket": "bitscatter-chunks",
+      "Region": "us-east-1",
+      "AccessKey": "your-access-key",
+      "SecretKey": "your-secret-key",
+      "Endpoint": "http://localhost:9000",
+      "ForcePathStyle": true
+    }
   },
   "Serilog": {
     "MinimumLevel": {
@@ -164,11 +177,18 @@ Edit `src/BitScatter.Cli/appsettings.json`:
 `BitScatter:DatabaseProviders` is the preferred way to configure database chunk storage.  
 `ConnectionStrings:ChunkStorage` is still supported as a fallback when no database provider entry is present.
 
+`BitScatter:S3` enables a single S3 provider. Required fields are: `Bucket`, `Region`, `AccessKey`, and `SecretKey`.
+`Endpoint` and `ForcePathStyle` are optional for S3-compatible services such as MinIO.
+
 Environment variable overrides use the `BITSCATTER_` prefix (double underscore for nesting):
 
 ```bash
 export BITSCATTER_ConnectionStrings__Metadata="Data Source=bitscatter.db"
 export BITSCATTER_ConnectionStrings__ChunkStorage="Host=localhost;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
+export BITSCATTER_BitScatter__S3__Bucket="bitscatter-chunks"
+export BITSCATTER_BitScatter__S3__Region="us-east-1"
+export BITSCATTER_BitScatter__S3__AccessKey="your-access-key"
+export BITSCATTER_BitScatter__S3__SecretKey="your-secret-key"
 ```
 
 ## Running Tests
