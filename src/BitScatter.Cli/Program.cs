@@ -6,8 +6,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using Spectre.Console.Cli;
 
+var configPath = Environment.GetEnvironmentVariable("BITSCATTER_CONFIG_PATH");
+if (string.IsNullOrWhiteSpace(configPath))
+{
+    configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+}
+
 var configuration = new ConfigurationBuilder()
-    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+    .AddJsonFile(configPath, optional: true, reloadOnChange: false)
     .AddEnvironmentVariables("BITSCATTER_")
     .Build();
 

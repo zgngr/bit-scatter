@@ -120,7 +120,13 @@ dotnet run --project src/BitScatter.Cli -- delete <file-id>
 
 ## Configuration
 
-Edit `src/BitScatter.Cli/appsettings.json`:
+BitScatter loads configuration in this order (highest precedence first):
+
+1. `BITSCATTER_...` environment variables
+2. JSON file (`BITSCATTER_CONFIG_PATH` if set, otherwise `<executable-dir>/appsettings.json`)
+3. Built-in code defaults/fallbacks
+
+Edit `src/BitScatter.Cli/appsettings.json` (or provide an external file and set `BITSCATTER_CONFIG_PATH`):
 
 ```json
 {
@@ -191,6 +197,60 @@ export BITSCATTER_BitScatter__S3__AccessKey="your-access-key"
 export BITSCATTER_BitScatter__S3__SecretKey="your-secret-key"
 ```
 
+### Config In Production
+
+Environment-only deployment (no JSON file required):
+
+```bash
+export BITSCATTER_ConnectionStrings__Metadata="Data Source=/var/lib/bitscatter/bitscatter.db"
+export BITSCATTER_BitScatter__FileSystemProviders__0__Name="node1"
+export BITSCATTER_BitScatter__FileSystemProviders__0__Path="/var/lib/bitscatter/node1"
+./bitscatter list
+```
+
+Environment + explicit JSON path:
+
+```bash
+export BITSCATTER_CONFIG_PATH="/etc/bitscatter/appsettings.json"
+export BITSCATTER_BitScatter__S3__AccessKey="prod-access-key"
+export BITSCATTER_BitScatter__S3__SecretKey="prod-secret-key"
+./bitscatter list
+```
+
+## Versioning And Release
+
+Releases are SemVer-tag driven. `make release` only works when `HEAD` is tagged with:
+
+- Stable: `vMAJOR.MINOR.PATCH` (example: `v1.4.0`)
+- Pre-release: `vMAJOR.MINOR.PATCH-rc.N` (example: `v1.4.0-rc.1`)
+
+Create and push a release tag:
+
+```bash
+git tag v1.4.0
+git push origin v1.4.0
+```
+
+Build self-contained single-file release artifacts for all supported RIDs:
+
+```bash
+make release
+```
+
+Build one RID only:
+
+```bash
+make release-one RID=linux-x64
+```
+
+Artifacts are written to:
+
+```text
+artifacts/release/<tag>/<rid>/
+```
+
+Each RID folder contains a single executable (`bitscatter` or `bitscatter.exe`) and `appsettings.example.json`.
+
 ## Running Tests
 
 ```bash
@@ -219,6 +279,10 @@ Benchmarks measure chunking throughput across file sizes (1 MB, 10 MB) and chunk
 | `make restore` | Restore NuGet packages |
 | `make clean` | Clean build artifacts |
 | `make format` | Format code with `dotnet format` |
+| `make release` | Publish single-file self-contained release artifacts for all RIDs (requires SemVer tag on HEAD) |
+| `make release-one RID=linux-x64` | Publish a single RID release artifact |
+| `make release-smoke` | Run `--help` smoke test for host-compatible release binary |
+| `make release-validate-version` | Validate that HEAD has exactly one SemVer release tag |
 | `make docker-up` | Start PostgreSQL container |
 | `make docker-down` | Stop PostgreSQL container |
 | `make docker-logs` | Tail PostgreSQL container logs |
