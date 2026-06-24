@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\BitScatter.Application\BitScatter.Application.csproj" />
+    <ProjectReference Include="..\..\src\libs\BitScatter.Application\BitScatter.Application.csproj" />
   </ItemGroup>
 
 </Project>

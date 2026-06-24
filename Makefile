@@ -1,7 +1,7 @@
 .PHONY: build test run-upload run-upload-multi run-upload-glob run-list run-delete run-download docker-up docker-down docker-logs docker-logs-postgres docker-logs-localstack docker-init-s3 restore clean demo format release release-one release-smoke release-validate-version
 
 SOLUTION := BitScatter.slnx
-CLI_PROJECT := src/BitScatter.Cli/BitScatter.Cli.csproj
+CLI_PROJECT := src/apps/BitScatter.Cli/BitScatter.Cli.csproj
 POSTGRES_SERVICE := postgres
 LOCALSTACK_SERVICE := localstack
 LOCALSTACK_CONTAINER := bitscatter-localstack
@@ -17,7 +17,7 @@ test:
 	dotnet test $(SOLUTION) --configuration Release --no-build --logger "console;verbosity=detailed"
 
 test-watch:
-	dotnet watch test --project tests/BitScatter.Application.Tests/BitScatter.Application.Tests.csproj
+	dotnet watch test --project tests/libs/BitScatter.Application.Tests/BitScatter.Application.Tests.csproj
 
 restore:
 	dotnet restore $(SOLUTION)
@@ -36,6 +36,7 @@ run-list:
 
 run-delete:
 	dotnet run --project $(CLI_PROJECT) -- delete $(ID)
+
 
 docker-up:
 	docker compose up -d
@@ -110,7 +111,7 @@ release: release-validate-version
 		if [ -f "$$out_dir/appsettings.json" ]; then \
 			mv "$$out_dir/appsettings.json" "$$out_dir/appsettings.example.json"; \
 		else \
-			cp src/BitScatter.Cli/appsettings.json "$$out_dir/appsettings.example.json"; \
+			cp src/apps/BitScatter.Cli/appsettings.json "$$out_dir/appsettings.example.json"; \
 		fi; \
 	done; \
 	$(MAKE) release-smoke
@@ -144,7 +145,7 @@ release-one: release-validate-version
 	if [ -f "$$out_dir/appsettings.json" ]; then \
 		mv "$$out_dir/appsettings.json" "$$out_dir/appsettings.example.json"; \
 	else \
-		cp src/BitScatter.Cli/appsettings.json "$$out_dir/appsettings.example.json"; \
+		cp src/apps/BitScatter.Cli/appsettings.json "$$out_dir/appsettings.example.json"; \
 	fi; \
 	$(MAKE) release-smoke RID="$(RID)"
 

@@ -1,0 +1,234 @@
+using Amazon;
+using Amazon.Runtime;
+using Amazon.S3;
+using BitScatter.Application.Interfaces;
+using BitScatter.Application.Services;
+using BitScatter.Application.Strategies;
+using BitScatter.Infrastructure.Configuration;
+using BitScatter.Infrastructure.Data;
+using BitScatter.Infrastructure.Repositories;
+using BitScatter.Infrastructure.Storage;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+namespace BitScatter.Infrastructure.DependencyInjection;
+
+public static class ServiceCollectionExtensions
+{
+    public static IServiceCollection AddBitScatterInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var metadataConnectionString = configuration.GetConnectionString("Metadata")
+            ?? "Data Source=bitscatter.db";
+
+        services.AddDbContextFactory<BitScatterDbContext>(options =>
+            options.UseSqlite(metadataConnectionString));
+
+        var dbProvider = configuration
+            .GetSection("BitScatter:DatabaseProviders")
+            .GetChildren()
+            .Select(s => new DatabaseProviderOptions
+            {
+                Name = s["Name"] ?? string.Empty,
+                ConnectionString = s["ConnectionString"] ?? string.Empty
+            })
+            .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.ConnectionString));
+
+        var chunkConnectionString = dbProvider?.ConnectionString
+            ?? configuration.GetConnectionString("ChunkStorage");
+
+        if (!string.IsNullOrWhiteSpace(chunkConnectionString))
+        {
+            services.AddDbContextFactory<ChunkStorageDbContext>(options =>
+                options.UseNpgsql(chunkConnectionString));
+
+            services.AddScoped<IStorageProvider>(sp =>
+                new DatabaseStorageProvider(
+                    sp.GetRequiredService<IDbContextFactory<ChunkStorageDbContext>>(),
+                    sp.GetRequiredService<ILogger<DatabaseStorageProvider>>(),
+                    dbProvider?.Name));
+        }
+
+        var s3Section = configuration.GetSection("BitScatter:S3");
+        if (s3Section.Exists())
+        {
+            var s3Options = BuildS3Options(s3Section);
+            ValidateS3Options(s3Options);
+
+            var s3Name = string.IsNullOrWhiteSpace(s3Options.Name) ? "s3" : s3Options.Name;
+            services.AddScoped<IStorageProvider>(sp =>
+            {
+                var credentials = new BasicAWSCredentials(s3Options.AccessKey, s3Options.SecretKey);
+                var s3Config = new AmazonS3Config
+                {
+                    RegionEndpoint = RegionEndpoint.GetBySystemName(s3Options.Region)
+                };
+
+                if (!string.IsNullOrWhiteSpace(s3Options.Endpoint))
+                {
+                    s3Config.ServiceURL = s3Options.Endpoint;
+                }
+
+                if (s3Options.ForcePathStyle.HasValue)
+                {
+                    s3Config.ForcePathStyle = s3Options.ForcePathStyle.Value;
+                }
+
+                return new S3StorageProvider(
+                    s3Name,
+                    s3Options.Bucket,
+                    new AmazonS3Client(credentials, s3Config),
+                    sp.GetRequiredService<ILogger<S3StorageProvider>>());
+            });
+        }
+
+        var fsProviders = configuration
+            .GetSection("BitScatter:FileSystemProviders")
+            .GetChildren()
+            .Select(s => new FileSystemProviderOptions
+            {
+                Name = s["Name"] ?? string.Empty,
+                Path = s["Path"] ?? string.Empty
+            })
+            .Where(p => !string.IsNullOrEmpty(p.Name) && !string.IsNullOrEmpty(p.Path))
+            .ToArray();
+
+        if (fsProviders.Length > 0)
+        {
+            foreach (var fsProvider in fsProviders)
+            {
+                var name = fsProvider.Name;
+                var path = fsProvider.Path;
+                services.AddScoped<IStorageProvider>(sp =>
+                    new FileSystemStorageProvider(
+                        name,
+                        path,
+                        sp.GetRequiredService<ILogger<FileSystemStorageProvider>>()));
+            }
+        }
+        else
+        {
+            // Fallback: single provider from legacy config
+            var fileSystemPath = configuration["Storage:FileSystemPath"] ?? "chunks";
+            services.AddScoped<IStorageProvider>(sp =>
+                new FileSystemStorageProvider(
+                    "filesystem",
+                    fileSystemPath,
+                    sp.GetRequiredService<ILogger<FileSystemStorageProvider>>()));
+        }
+
+        services.AddScoped<IFileManifestRepository, FileManifestRepository>();
+        services.AddSingleton<IPlacementStrategy, RoundRobinPlacementStrategy>();
+        services.AddSingleton<IChunkingStrategyFactory, FixedSizeChunkingStrategyFactory>();
+        services.AddScoped<IUploadService, UploadService>();
+        services.AddScoped<IDownloadService, DownloadService>();
+        services.AddScoped<IDeleteService, DeleteService>();
+
+        return services;
+    }
+
+    public static async Task MigrateAsync(this IServiceProvider serviceProvider)
+    {
+        var metaFactory = serviceProvider.GetRequiredService<IDbContextFactory<BitScatterDbContext>>();
+        await using var metaDb = await metaFactory.CreateDbContextAsync();
+
+        bool created = await metaDb.Database.EnsureCreatedAsync();
+        if (!created)
+        {
+            // Database already existed — apply incremental schema changes.
+            // SQLite does not support formal migrations in this project; we use
+            // "ADD COLUMN IF NOT EXISTS" semantics via a try/catch instead.
+            await ApplyMetadataSchemaUpdatesAsync(metaDb);
+        }
+
+        var chunkFactory = serviceProvider.GetService<IDbContextFactory<ChunkStorageDbContext>>();
+        if (chunkFactory is not null)
+        {
+            await using var chunkDb = await chunkFactory.CreateDbContextAsync();
+            await chunkDb.Database.EnsureCreatedAsync();
+        }
+    }
+
+    // SQLite ALTER TABLE does not support IF NOT EXISTS, so we catch the error silently.
+    private static async Task ApplyMetadataSchemaUpdatesAsync(BitScatterDbContext context)
+    {
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"FileManifests\" ADD COLUMN \"Status\" INTEGER NOT NULL DEFAULT 0");
+        }
+        catch
+        {
+            // Column already present — no action required.
+        }
+
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"FileManifests\" ADD COLUMN \"IsEncrypted\" INTEGER NOT NULL DEFAULT 0");
+        }
+        catch { }
+
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"FileManifests\" ADD COLUMN \"EncryptedKey\" TEXT NULL");
+        }
+        catch { }
+
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"FileManifests\" ADD COLUMN \"EncryptionSalt\" TEXT NULL");
+        }
+        catch { }
+
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"FileManifests\" ADD COLUMN \"EncryptionIv\" TEXT NULL");
+        }
+        catch { }
+
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"FileManifests\" ADD COLUMN \"EncryptionTag\" TEXT NULL");
+        }
+        catch { }
+    }
+
+    private static S3ProviderOptions BuildS3Options(IConfigurationSection section)
+    {
+        bool? forcePathStyle = null;
+        if (bool.TryParse(section["ForcePathStyle"], out var parsedForcePathStyle))
+            forcePathStyle = parsedForcePathStyle;
+
+        return new S3ProviderOptions
+        {
+            Name = section["Name"] ?? "s3",
+            Bucket = section["Bucket"] ?? string.Empty,
+            Region = section["Region"] ?? string.Empty,
+            AccessKey = section["AccessKey"] ?? string.Empty,
+            SecretKey = section["SecretKey"] ?? string.Empty,
+            Endpoint = section["Endpoint"],
+            ForcePathStyle = forcePathStyle
+        };
+    }
+
+    private static void ValidateS3Options(S3ProviderOptions options)
+    {
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(options.Bucket)) missing.Add("Bucket");
+        if (string.IsNullOrWhiteSpace(options.Region)) missing.Add("Region");
+        if (string.IsNullOrWhiteSpace(options.AccessKey)) missing.Add("AccessKey");
+        if (string.IsNullOrWhiteSpace(options.SecretKey)) missing.Add("SecretKey");
+
+        if (missing.Count > 0)
+            throw new InvalidOperationException(
+                $"BitScatter:S3 is configured but missing required field(s): {string.Join(", ", missing)}");
+    }
+}

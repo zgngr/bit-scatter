@@ -1,293 +1,67 @@
 # BitScatter
 
-BitScatter is a .NET 10 console application that splits large files into chunks, distributes them across multiple storage providers (file system, PostgreSQL, and/or Amazon S3), and reassembles them with SHA-256 integrity verification.
+BitScatter is a .NET 10 console application that splits files into chunks, round-robin distributes them across multiple storage backends (Local Filesystem, PostgreSQL, and Amazon S3), and reassembles them with SHA-256 integrity verification.
 
-## Features
-
-- **Chunked file upload**: Files are split into fixed-size chunks (configurable, default 1024 KB)
-- **Parallel batch uploads**: Multiple files are uploaded concurrently using `Parallel.ForEachAsync` (default max concurrency: 4 files)
-- **Glob pattern support**: Accepts file glob patterns (e.g., `*.bin`) for batch uploads
-- **Multi-provider distribution**: Chunks are round-robin distributed across configured storage providers
-- **SHA-256 integrity**: Both individual chunks and the full reconstructed file are verified
-- **Retry logic**: Polly-based retry policies with exponential backoff for transient storage failures
-- **Metadata persistence**: File manifests and chunk metadata stored in SQLite
-- **CLI interface**: Spectre.Console-powered CLI with per-file progress bars and result tables
-- **Streaming architecture**: Files are chunked and transferred as streams — no full-file buffering
-
-## Architecture
-
-```
-BitScatter.Cli            → CLI entry point (Spectre.Console.Cli, DI wiring, Serilog)
-BitScatter.Application    → Business logic, interfaces, DTOs, strategies
-BitScatter.Domain         → Entities, enums, domain exceptions
-BitScatter.Infrastructure → EF Core, storage providers, repositories, DI extensions
-```
-
-Dependencies flow inward: `Cli → Application ← Infrastructure`, with `Domain` at the core.
-
-### Key Abstractions
-
-| Interface | Description |
-|---|---|
-| `IStorageProvider` | Pluggable chunk storage (FileSystem, Database, S3) |
-| `IChunkingStrategy` | Pluggable file splitting strategy (yields `IAsyncEnumerable<ChunkData>`) |
-| `IChunkingStrategyFactory` | Creates `IChunkingStrategy` instances via DI |
-| `IPlacementStrategy` | Selects which provider receives a given chunk |
-| `IFileManifestRepository` | Metadata persistence for file manifests and chunk info |
-| `IUploadService` | Orchestrates chunking, scattering, and manifest persistence |
-| `IDownloadService` | Orchestrates chunk retrieval, integrity verification, and reassembly |
-| `IDeleteService` | Deletes file manifests and stored chunks |
-
-### Storage Providers
-
-| Provider | Backend | Retry Policy |
-|---|---|---|
-| `FileSystemStorageProvider` | Local filesystem (configurable paths) | 3 retries on `IOException`, exponential backoff (200/400/600 ms) |
-| `DatabaseStorageProvider` | PostgreSQL via EF Core | 3 retries on transient exceptions, exponential backoff |
-| `S3StorageProvider` | Amazon S3 or S3-compatible APIs | 3 retries on transient exceptions, exponential backoff |
-
-### Databases
-
-| Database | Purpose | Default |
-|---|---|---|
-| SQLite (`BitScatterDbContext`) | File manifests and chunk metadata | `bitscatter.db` |
-| PostgreSQL (`ChunkStorageDbContext`) | Raw chunk binary data | Enabled in default `appsettings.json` |
-
-## Prerequisites
-
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- [Docker](https://www.docker.com/) (required for default configuration, which includes PostgreSQL chunk storage)
 
 ## Quick Start
 
-### 1. Start PostgreSQL
-
+### 1. Prerequisites & Services
+Ensure you have the .NET 10 SDK and Docker installed.
 ```bash
-make docker-up
+make docker-up # Starts PostgreSQL container
+make build     # Builds release config
 ```
 
-### 2. Build
-
+### 2. Basic Commands
 ```bash
-make build
-```
-
-### 3. Upload a file
-
-```bash
-# Upload a single file (uses all configured providers by default)
+# Upload a file (supports multiple files / glob pattern)
 dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin
 
-# Upload with a custom chunk size (512 KB)
-dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --chunk-size 512
-
-# Upload to filesystem providers only
-dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --providers filesystem
-
-# Upload to database storage (requires PostgreSQL)
-dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --providers database
-
-# Upload to Amazon S3 storage
-dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --providers s3
-
-# Upload with a max in-flight chunk limit
-dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin --max-inflight-chunks 16
-
-# Upload multiple files in parallel
-dotnet run --project src/BitScatter.Cli -- upload file1.bin file2.bin file3.bin
-
-# Upload using a glob pattern
-dotnet run --project src/BitScatter.Cli -- upload "/data/*.bin"
-```
-
-### 4. List uploaded files
-
-```bash
+# List uploaded files
 dotnet run --project src/BitScatter.Cli -- list
-```
 
-### 5. Download a file
-
-```bash
+# Download a file by its ID
 dotnet run --project src/BitScatter.Cli -- download <file-id> /path/to/output.bin
-```
 
-### 6. Delete a file
-
-```bash
+# Delete a file
 dotnet run --project src/BitScatter.Cli -- delete <file-id>
 ```
 
 ## Configuration
 
-BitScatter loads configuration in this order (highest precedence first):
+Settings are loaded from `src/BitScatter.Cli/appsettings.json` or `BITSCATTER_` environment variables.
 
-1. `BITSCATTER_...` environment variables
-2. JSON file (`BITSCATTER_CONFIG_PATH` if set, otherwise `<executable-dir>/appsettings.json`)
-3. Built-in code defaults/fallbacks
-
-Edit `src/BitScatter.Cli/appsettings.json` (or provide an external file and set `BITSCATTER_CONFIG_PATH`):
-
+Example `appsettings.json`:
 ```json
 {
   "BitScatter": {
     "Metadata": "bitscatter.db",
-    "FileSystemProviders": [
-      { "Name": "node1", "Path": "/tmp/node1" },
-      { "Name": "node2", "Path": "/tmp/node2" },
-      { "Name": "node3", "Path": "/tmp/node3" },
-      { "Name": "node4", "Path": "/tmp/node4" }
-    ],
-    "DatabaseProviders": [
-      {
-        "Name": "database",
-        "ConnectionString": "Host=localhost;Port=5432;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
-      }
-    ],
+    "FileSystemProviders": [{ "Name": "node1", "Path": "/tmp/node1" }],
+    "DatabaseProviders": [{
+      "Name": "postgres",
+      "ConnectionString": "Host=localhost;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
+    }],
     "S3": {
       "Name": "s3",
       "Bucket": "bitscatter-chunks",
       "Region": "us-east-1",
       "AccessKey": "your-access-key",
-      "SecretKey": "your-secret-key",
-      "Endpoint": "http://localhost:9000",
-      "ForcePathStyle": true
+      "SecretKey": "your-secret-key"
     }
-  },
-  "Serilog": {
-    "MinimumLevel": {
-      "Default": "Debug",
-      "Override": {
-        "Microsoft": "Warning",
-        "System": "Warning"
-      }
-    },
-    "WriteTo": [
-      {
-        "Name": "Console",
-        "Args": { "restrictedToMinimumLevel": "Fatal" }
-      },
-      {
-        "Name": "File",
-        "Args": {
-          "path": "logs/bitscatter-.log",
-          "rollingInterval": "Day",
-          "restrictedToMinimumLevel": "Information"
-        }
-      }
-    ]
   }
 }
 ```
 
-`BitScatter:DatabaseProviders` is the preferred way to configure database chunk storage.  
-`ConnectionStrings:ChunkStorage` is still supported as a fallback when no database provider entry is present.
+## Development & Test
 
-`BitScatter:S3` enables a single S3 provider. Required fields are: `Bucket`, `Region`, `AccessKey`, and `SecretKey`.
-`Endpoint` and `ForcePathStyle` are optional for S3-compatible services such as MinIO.
+- **Run Tests**: `make test` or `make test-watch`
+- **Run Benchmarks**: `dotnet run --project benchmarks/BitScatter.Benchmarks -c Release`
+- **Run E2E Demo**: `make demo`
 
-Environment variable overrides use the `BITSCATTER_` prefix (double underscore for nesting):
+## Release
 
+Release artifacts are built into single-file, self-contained executables:
 ```bash
-export BITSCATTER_ConnectionStrings__Metadata="Data Source=bitscatter.db"
-export BITSCATTER_ConnectionStrings__ChunkStorage="Host=localhost;Database=bitscatter_chunks;Username=bitscatter;Password=bitscatter"
-export BITSCATTER_BitScatter__S3__Bucket="bitscatter-chunks"
-export BITSCATTER_BitScatter__S3__Region="us-east-1"
-export BITSCATTER_BitScatter__S3__AccessKey="your-access-key"
-export BITSCATTER_BitScatter__S3__SecretKey="your-secret-key"
-```
-
-### Config In Production
-
-Environment-only deployment (no JSON file required):
-
-```bash
-export BITSCATTER_ConnectionStrings__Metadata="Data Source=/var/lib/bitscatter/bitscatter.db"
-export BITSCATTER_BitScatter__FileSystemProviders__0__Name="node1"
-export BITSCATTER_BitScatter__FileSystemProviders__0__Path="/var/lib/bitscatter/node1"
-./bitscatter list
-```
-
-Environment + explicit JSON path:
-
-```bash
-export BITSCATTER_CONFIG_PATH="/etc/bitscatter/appsettings.json"
-export BITSCATTER_BitScatter__S3__AccessKey="prod-access-key"
-export BITSCATTER_BitScatter__S3__SecretKey="prod-secret-key"
-./bitscatter list
-```
-
-## Versioning And Release
-
-Releases are SemVer-tag driven. `make release` only works when `HEAD` is tagged with:
-
-- Stable: `vMAJOR.MINOR.PATCH` (example: `v1.4.0`)
-- Pre-release: `vMAJOR.MINOR.PATCH-rc.N` (example: `v1.4.0-rc.1`)
-
-Create and push a release tag:
-
-```bash
-git tag v1.4.0
-git push origin v1.4.0
-```
-
-Build self-contained single-file release artifacts for all supported RIDs:
-
-```bash
+git tag v1.4.0 && git push origin v1.4.0
 make release
 ```
-
-Build one RID only:
-
-```bash
-make release-one RID=linux-x64
-```
-
-Artifacts are written to:
-
-```text
-artifacts/release/<tag>/<rid>/
-```
-
-Each RID folder contains a single executable (`bitscatter` or `bitscatter.exe`) and `appsettings.example.json`.
-
-## Running Tests
-
-```bash
-make test
-
-# Watch mode (re-runs on file changes)
-make test-watch
-```
-The test suite covers Domain, Application, and Infrastructure layers.
-
-## Running Benchmarks
-
-```bash
-dotnet run --project benchmarks/BitScatter.Benchmarks -c Release
-```
-
-Benchmarks measure chunking throughput across file sizes (1 MB, 10 MB) and chunk sizes (64 KB, 512 KB, 1 MB) with memory allocation tracking via `[MemoryDiagnoser]`.
-
-## Makefile Targets
-
-| Target | Description |
-|---|---|
-| `make build` | Build in Release configuration |
-| `make test` | Run all tests |
-| `make test-watch` | Run Application tests in watch mode |
-| `make restore` | Restore NuGet packages |
-| `make clean` | Clean build artifacts |
-| `make format` | Format code with `dotnet format` |
-| `make release` | Publish single-file self-contained release artifacts for all RIDs (requires SemVer tag on HEAD) |
-| `make release-one RID=linux-x64` | Publish a single RID release artifact |
-| `make release-smoke` | Run `--help` smoke test for host-compatible release binary |
-| `make release-validate-version` | Validate that HEAD has exactly one SemVer release tag |
-| `make docker-up` | Start PostgreSQL container |
-| `make docker-down` | Stop PostgreSQL container |
-| `make docker-logs` | Tail PostgreSQL container logs |
-| `make run-list` | List all uploaded files |
-| `make run-upload PATTERN=/path/to/file.bin` | Upload one file/path pattern |
-| `make run-download ID=<guid> OUTPUT=path` | Download a file by ID |
-| `make run-delete ID=<guid>` | Delete a file and all its chunks |
-| `make demo` | Run end-to-end upload → download → verify → delete pipeline |
