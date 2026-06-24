@@ -2,6 +2,13 @@
 
 BitScatter is a .NET 10 console application that splits files into chunks, round-robin distributes them across multiple storage backends (Local Filesystem, PostgreSQL, and Amazon S3), and reassembles them with SHA-256 integrity verification.
 
+## Features
+
+- **End-to-End Client-Side Encryption**: Encrypts chunks using AES-256-GCM before uploading.
+- **Zero-Knowledge Key Encapsulation**: Derives a Key Encryption Key (KEK) using PBKDF2 (100,000 iterations) from your password to encrypt a unique random File Encryption Key (FEK) stored in metadata.
+- **Storage Key Obfuscation**: Randomizes storage paths (e.g., `chunks/<guid>`) to prevent remote storage providers from associating chunks with files or indices.
+- **Chunked file upload**: Splits files into fixed-size chunks (default 1024 KB) and transfers them as streams.
+- **Parallel batch uploads**: Concurrently uploads files using `Parallel.ForEachAsync`.
 
 ## Quick Start
 
@@ -14,22 +21,31 @@ make build     # Builds release config
 
 ### 2. Basic Commands
 ```bash
-# Upload a file (supports multiple files / glob pattern)
-dotnet run --project src/BitScatter.Cli -- upload /path/to/file.bin
+# Upload a file
+dotnet run --project src/apps/BitScatter.Cli -- upload /path/to/file.bin
 
 # List uploaded files
-dotnet run --project src/BitScatter.Cli -- list
+dotnet run --project src/apps/BitScatter.Cli -- list
 
 # Download a file by its ID
-dotnet run --project src/BitScatter.Cli -- download <file-id> /path/to/output.bin
+dotnet run --project src/apps/BitScatter.Cli -- download <file-id> /path/to/output.bin
 
 # Delete a file
-dotnet run --project src/BitScatter.Cli -- delete <file-id>
+dotnet run --project src/apps/BitScatter.Cli -- delete <file-id>
+```
+
+### 3. Encryption & Obfuscation Commands
+```bash
+# Upload a file with password encryption and randomized storage keys
+dotnet run --project src/apps/BitScatter.Cli -- upload /path/to/file.bin --password mypassword123 --obfuscate-keys
+
+# Download an encrypted file (you will be prompted securely if --password is omitted)
+dotnet run --project src/apps/BitScatter.Cli -- download <file-id> /path/to/output.bin --password mypassword123
 ```
 
 ## Configuration
 
-Settings are loaded from `src/BitScatter.Cli/appsettings.json` or `BITSCATTER_` environment variables.
+Settings are loaded from `src/apps/BitScatter.Cli/appsettings.json` or `BITSCATTER_` environment variables.
 
 Example `appsettings.json`:
 ```json
