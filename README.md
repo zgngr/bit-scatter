@@ -5,6 +5,7 @@ BitScatter is a .NET 10 console application that splits files into chunks, round
 ## Features
 
 - **End-to-End Client-Side Encryption**: Encrypts chunks using AES-256-GCM before uploading.
+- **Adaptive Per-Chunk Compression**: Compresses chunks with Brotli before encryption, keeping the compressed payload only if it shrinks by 5% or more (prevents overhead on incompressible files).
 - **Zero-Knowledge Key Encapsulation**: Derives a Key Encryption Key (KEK) using PBKDF2 (100,000 iterations) from your password to encrypt a unique random File Encryption Key (FEK) stored in metadata.
 - **Storage Key Obfuscation**: Randomizes storage paths (e.g., `chunks/<guid>`) to prevent remote storage providers from associating chunks with files or indices.
 - **Chunked file upload**: Splits files into fixed-size chunks (default 1024 KB) and transfers them as streams.
@@ -34,12 +35,18 @@ dotnet run --project src/apps/BitScatter.Cli -- download <file-id> /path/to/outp
 dotnet run --project src/apps/BitScatter.Cli -- delete <file-id>
 ```
 
-### 3. Encryption & Obfuscation Commands
+### 3. Compression, Encryption & Obfuscation Commands
 ```bash
+# Upload a file with Brotli compression
+dotnet run --project src/apps/BitScatter.Cli -- upload /path/to/file.bin --compress
+
 # Upload a file with password encryption and randomized storage keys
 dotnet run --project src/apps/BitScatter.Cli -- upload /path/to/file.bin --password mypassword123 --obfuscate-keys
 
-# Download an encrypted file (you will be prompted securely if --password is omitted)
+# Upload a file with both compression and encryption (compress -> encrypt -> store)
+dotnet run --project src/apps/BitScatter.Cli -- upload /path/to/file.bin --compress --password mypassword123
+
+# Download an encrypted file (you will be prompted securely if --password is omitted; decompression is fully automatic)
 dotnet run --project src/apps/BitScatter.Cli -- download <file-id> /path/to/output.bin --password mypassword123
 ```
 

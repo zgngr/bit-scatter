@@ -1,4 +1,6 @@
+using System.IO.Compression;
 using System.Security.Cryptography;
+using BitScatter.Application.Helpers;
 using BitScatter.Application.Interfaces;
 using BitScatter.Application.Services;
 using BitScatter.Domain.Entities;
@@ -180,6 +182,86 @@ public class DownloadServiceTests : IDisposable
             () => _sut.DownloadAsync(manifest.Id, outputPath));
 
         File.Exists(outputPath).Should().BeFalse("partial file must be deleted when provider throws");
+    }
+
+    [Fact]
+    public async Task DownloadAsync_CompressedChunks_CorrectlyDecompresses()
+    {
+        // Arrange
+        // Create highly compressible chunk data
+        var originalChunk0 = new byte[100];
+        Array.Fill(originalChunk0, (byte)'A');
+        
+        var originalChunk1 = new byte[100];
+        Array.Fill(originalChunk1, (byte)'B');
+
+        // Compress chunk 0 (force it by threshold 1.0)
+        var (compressedChunk0, wasCompressed0) = CompressionHelper.TryCompress(originalChunk0, CompressionLevel.Optimal, 1.0);
+        Assert.True(wasCompressed0);
+
+        // Keep chunk 1 uncompressed
+        var compressedChunk1 = originalChunk1;
+
+        var chunk0Checksum = Convert.ToHexString(SHA256.HashData(compressedChunk0)).ToLowerInvariant();
+        var chunk1Checksum = Convert.ToHexString(SHA256.HashData(compressedChunk1)).ToLowerInvariant();
+
+        var combinedOriginal = new byte[originalChunk0.Length + originalChunk1.Length];
+        Buffer.BlockCopy(originalChunk0, 0, combinedOriginal, 0, originalChunk0.Length);
+        Buffer.BlockCopy(originalChunk1, 0, combinedOriginal, originalChunk0.Length, originalChunk1.Length);
+        var expectedFileChecksum = Convert.ToHexString(SHA256.HashData(combinedOriginal)).ToLowerInvariant();
+
+        var manifest = new FileManifest
+        {
+            FileName = "compressed_test.bin",
+            OriginalSize = combinedOriginal.Length,
+            Sha256Checksum = expectedFileChecksum,
+            ChunkSize = originalChunk0.Length
+        };
+
+        manifest.Chunks.Add(new ChunkInfo
+        {
+            FileManifestId = manifest.Id,
+            ChunkIndex = 0,
+            Size = compressedChunk0.Length,
+            Sha256Checksum = chunk0Checksum,
+            IsCompressed = true,
+            StorageProviderType = StorageProviderType.FileSystem,
+            StorageKey = $"{manifest.Id}/0"
+        });
+
+        manifest.Chunks.Add(new ChunkInfo
+        {
+            FileManifestId = manifest.Id,
+            ChunkIndex = 1,
+            Size = compressedChunk1.Length,
+            Sha256Checksum = chunk1Checksum,
+            IsCompressed = false,
+            StorageProviderType = StorageProviderType.FileSystem,
+            StorageKey = $"{manifest.Id}/1"
+        });
+
+        _repoMock.Setup(r => r.GetByIdAsync(manifest.Id, It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(manifest);
+
+        _providerMock
+            .Setup(p => p.ReadChunkAsync($"{manifest.Id}/0", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MemoryStream(compressedChunk0));
+
+        _providerMock
+            .Setup(p => p.ReadChunkAsync($"{manifest.Id}/1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MemoryStream(compressedChunk1));
+
+        var outputPath = Path.Combine(_tempDir, "decompressed_output.bin");
+
+        // Act
+        var result = await _sut.DownloadAsync(manifest.Id, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        File.Exists(outputPath).Should().BeTrue();
+        
+        var downloadedBytes = await File.ReadAllBytesAsync(outputPath);
+        downloadedBytes.Should().Equal(combinedOriginal);
     }
 
     public void Dispose()

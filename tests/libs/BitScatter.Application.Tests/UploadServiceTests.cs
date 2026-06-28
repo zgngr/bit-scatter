@@ -552,6 +552,71 @@ public class UploadServiceTests : IDisposable
         maxObserved.Should().BeLessThanOrEqualTo(2);
     }
 
+    [Fact]
+    public async Task UploadManyAsync_WithCompression_CompressibleFile_SavesCompressedChunks()
+    {
+        // Arrange
+        var compressibleFilePath = Path.Combine(_tempDir, "compressible.bin");
+        var compressibleContent = new byte[2048];
+        Array.Fill(compressibleContent, (byte)'A');
+        await File.WriteAllBytesAsync(compressibleFilePath, compressibleContent);
+
+        IReadOnlyList<ChunkInfo>? savedChunks = null;
+        _repoMock
+            .Setup(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, IReadOnlyList<ChunkInfo>, CancellationToken>((id, hash, chunks, ct) => savedChunks = chunks)
+            .Returns(Task.CompletedTask);
+
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [StorageProviderType.FileSystem],
+            EnableCompression = true
+        };
+
+        // Act
+        var batchResult = await _sut.UploadManyAsync([compressibleFilePath], options);
+
+        // Assert
+        batchResult.SuccessCount.Should().Be(1);
+        savedChunks.Should().NotBeNull();
+        savedChunks!.Count.Should().Be(2);
+        foreach (var chunk in savedChunks)
+        {
+            chunk.IsCompressed.Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task UploadManyAsync_WithCompression_IncompressibleFile_SkipsCompression()
+    {
+        // Arrange
+        IReadOnlyList<ChunkInfo>? savedChunks = null;
+        _repoMock
+            .Setup(r => r.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<ChunkInfo>>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, IReadOnlyList<ChunkInfo>, CancellationToken>((id, hash, chunks, ct) => savedChunks = chunks)
+            .Returns(Task.CompletedTask);
+
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [StorageProviderType.FileSystem],
+            EnableCompression = true // Enabled but content is random/incompressible
+        };
+
+        // Act
+        var batchResult = await _sut.UploadManyAsync([_testFile], options);
+
+        // Assert
+        batchResult.SuccessCount.Should().Be(1);
+        savedChunks.Should().NotBeNull();
+        savedChunks!.Count.Should().Be(2);
+        foreach (var chunk in savedChunks)
+        {
+            chunk.IsCompressed.Should().BeFalse();
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDir))

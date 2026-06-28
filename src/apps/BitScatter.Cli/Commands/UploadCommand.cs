@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using BitScatter.Application.DTOs;
 using BitScatter.Application.Interfaces;
 using BitScatter.Domain.Enums;
@@ -27,6 +28,10 @@ public class UploadCommandSettings : CommandSettings
 
     [CommandOption("--obfuscate-keys")]
     public bool ObfuscateStorageKeys { get; set; }
+
+    [CommandOption("--compress")]
+    [Description("Compress chunks with Brotli before storage. Adaptive: skips compression for incompressible chunks.")]
+    public bool Compress { get; set; }
 }
 
 public class UploadCommand : AsyncCommand<UploadCommandSettings>
@@ -54,7 +59,8 @@ public class UploadCommand : AsyncCommand<UploadCommandSettings>
             StorageProviders = ParseProviders(settings.Providers),
             MaxInFlightChunks = settings.MaxInFlightChunks,
             EncryptionPassword = settings.EncryptionPassword,
-            ObfuscateStorageKeys = settings.ObfuscateStorageKeys
+            ObfuscateStorageKeys = settings.ObfuscateStorageKeys,
+            EnableCompression = settings.Compress
         };
 
         BatchUploadResult? batchResult = null;

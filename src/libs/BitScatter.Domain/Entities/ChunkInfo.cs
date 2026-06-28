@@ -12,6 +12,7 @@ public class ChunkInfo
     public StorageProviderType StorageProviderType { get; set; }
     public string ProviderName { get; set; } = string.Empty;
     public string StorageKey { get; set; } = string.Empty;
+    public bool IsCompressed { get; set; }
 
     public FileManifest FileManifest { get; set; } = null!;
 }

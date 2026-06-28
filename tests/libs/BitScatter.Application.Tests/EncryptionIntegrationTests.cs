@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -23,8 +24,8 @@ public class EncryptionIntegrationTests : IDisposable
     private readonly string _tempDir;
     private readonly string _testFile;
     private readonly byte[] _testFileContent;
-    private readonly Dictionary<Guid, FileManifest> _manifests = new();
-    private readonly Dictionary<string, byte[]> _storage = new();
+    private readonly ConcurrentDictionary<Guid, FileManifest> _manifests = new();
+    private readonly ConcurrentDictionary<string, byte[]> _storage = new();
     
     private readonly Mock<IFileManifestRepository> _repoMock;
     private readonly Mock<IStorageProvider> _providerMock;
@@ -137,6 +138,53 @@ public class EncryptionIntegrationTests : IDisposable
         
         var downloadedContent = await File.ReadAllBytesAsync(downloadPath);
         downloadedContent.Should().Equal(_testFileContent);
+    }
+
+    [Fact]
+    public async Task UploadAndDownload_WithCompressionAndEncryption_RoundtripsSuccessfully()
+    {
+        // Arrange
+        var compressibleFilePath = Path.Combine(_tempDir, "compressible_integration.bin");
+        var compressibleContent = new byte[5 * 1024]; // 5 KB
+        Array.Fill(compressibleContent, (byte)'X');
+        await File.WriteAllBytesAsync(compressibleFilePath, compressibleContent);
+
+        var password = "test-encryption-compression-password";
+        var options = new UploadOptions
+        {
+            ChunkSizeBytes = 1024,
+            StorageProviders = [StorageProviderType.FileSystem],
+            EncryptionPassword = password,
+            EnableCompression = true,
+            ObfuscateStorageKeys = true
+        };
+
+        // Act
+        // 1. Upload
+        var uploadBatchResult = await _uploadService.UploadManyAsync([compressibleFilePath], options);
+        var uploadResult = uploadBatchResult.Results.Should().ContainSingle().Subject;
+        uploadResult.Success.Should().BeTrue();
+
+        var manifestId = uploadResult.FileManifestId;
+        _manifests.Should().ContainKey(manifestId);
+        var manifest = _manifests[manifestId];
+
+        // Assert chunks are compressed
+        manifest.Chunks.Should().NotBeEmpty();
+        foreach (var chunk in manifest.Chunks)
+        {
+            chunk.IsCompressed.Should().BeTrue();
+        }
+
+        // 2. Download
+        var downloadPath = Path.Combine(_tempDir, "downloaded_compressed.bin");
+        var downloadResult = await _downloadService.DownloadAsync(manifestId, downloadPath, decryptionPassword: password);
+
+        // Assert
+        downloadResult.Success.Should().BeTrue();
+        
+        var downloadedContent = await File.ReadAllBytesAsync(downloadPath);
+        downloadedContent.Should().Equal(compressibleContent);
     }
 
     [Fact]

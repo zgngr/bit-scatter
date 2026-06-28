@@ -127,6 +127,11 @@ public class DownloadService : IDownloadService
                     plaintextBytes = encryptedBytes;
                 }
 
+                if (chunkInfo.IsCompressed)
+                {
+                    plaintextBytes = CompressionHelper.Decompress(plaintextBytes);
+                }
+
                 fileHash.AppendData(plaintextBytes);
                 await outputStream.WriteAsync(plaintextBytes, cancellationToken);
 

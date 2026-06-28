@@ -42,6 +42,12 @@ public class UploadOptions
     public bool ObfuscateStorageKeys { get; set; }
 
     /// <summary>
+    /// If true, each chunk will be compressed with Brotli before encryption/storage.
+    /// Adaptive: compression is only kept if the result is meaningfully smaller.
+    /// </summary>
+    public bool EnableCompression { get; set; }
+
+    /// <summary>
     /// Maximum number of files that may be uploaded concurrently in <c>UploadManyAsync</c>.
     /// Defaults to 4 — a conservative cap that limits memory and I/O pressure regardless of CPU count.
     /// </summary>

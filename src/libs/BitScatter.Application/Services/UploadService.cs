@@ -161,6 +161,18 @@ public class UploadService : IUploadService
                             using (pending.Chunk)
                             {
                                 byte[] plaintextBytes = ReadChunkBytes(pending.Chunk);
+                                bool chunkIsCompressed = false;
+
+                                if (options.EnableCompression)
+                                {
+                                    var (compressedData, wasCompressed) = CompressionHelper.TryCompress(plaintextBytes);
+                                    if (wasCompressed)
+                                    {
+                                        plaintextBytes = compressedData;
+                                        chunkIsCompressed = true;
+                                    }
+                                }
+
                                 byte[] payloadToSave;
                                 long sizeToRecord;
                                 string checksumToRecord;
@@ -179,16 +191,25 @@ public class UploadService : IUploadService
                                 else
                                 {
                                     payloadToSave = plaintextBytes;
-                                    sizeToRecord = pending.Chunk.Size;
-                                    checksumToRecord = pending.Chunk.Sha256Checksum;
+                                    if (chunkIsCompressed)
+                                    {
+                                        sizeToRecord = payloadToSave.Length;
+                                        checksumToRecord = Convert.ToHexString(SHA256.HashData(payloadToSave)).ToLowerInvariant();
+                                    }
+                                    else
+                                    {
+                                        sizeToRecord = pending.Chunk.Size;
+                                        checksumToRecord = pending.Chunk.Sha256Checksum;
+                                    }
                                 }
 
                                 _logger.LogDebug(
-                                    "Saving chunk {Index} to provider {Name} ({ProviderType}) with key {Key}",
+                                    "Saving chunk {Index} to provider {Name} ({ProviderType}) with key {Key} (Compressed: {IsCompressed})",
                                     pending.Chunk.Index,
                                     pending.Provider.Name,
                                     pending.Provider.ProviderType,
-                                    pending.StorageKey);
+                                    pending.StorageKey,
+                                    chunkIsCompressed);
 
                                 using var payloadStream = new MemoryStream(payloadToSave);
                                 await pending.Provider.SaveChunkAsync(payloadStream, pending.StorageKey, pipelineToken);
@@ -200,6 +221,7 @@ public class UploadService : IUploadService
                                     ChunkIndex = pending.Chunk.Index,
                                     Size = sizeToRecord,
                                     Sha256Checksum = checksumToRecord,
+                                    IsCompressed = chunkIsCompressed,
                                     StorageProviderType = pending.Provider.ProviderType,
                                     ProviderName = pending.Provider.Name,
                                     StorageKey = pending.StorageKey

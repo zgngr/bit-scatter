@@ -82,4 +82,11 @@ public class UploadOptionsTests
         options.MaxInFlightChunks = 16;
         options.MaxInFlightChunks.Should().Be(16);
     }
+
+    [Fact]
+    public void EnableCompression_DefaultValue_IsFalse()
+    {
+        var options = new UploadOptions();
+        options.EnableCompression.Should().BeFalse();
+    }
 }

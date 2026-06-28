@@ -199,6 +199,13 @@ public static class ServiceCollectionExtensions
                 "ALTER TABLE \"FileManifests\" ADD COLUMN \"EncryptionTag\" TEXT NULL");
         }
         catch { }
+
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"ChunkInfos\" ADD COLUMN \"IsCompressed\" INTEGER NOT NULL DEFAULT 0");
+        }
+        catch { }
     }
 
     private static S3ProviderOptions BuildS3Options(IConfigurationSection section)
