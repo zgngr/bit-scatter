@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "akka-net-best-practices": {
+      "source": "aaronontheweb/dotnet-skills",
+      "sourceType": "github",
+      "skillPath": "skills/akka-best-practices/SKILL.md",
+      "computedHash": "0b6f952b0a4fb45e28a8dffaf03af9b41a001f9f89597d6a411d9ea47d349017"
+    }
+  }
+}
